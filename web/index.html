@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>FJSP Schedule Viewer</title>
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="data.js"></script>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    margin: 0; padding: 16px; background: #f6f7f9; color: #1f2328;
+  }
+  h1 { font-size: 18px; margin: 0 0 12px; font-weight: 600; }
+  .toolbar {
+    display: flex; flex-wrap: wrap; gap: 18px;
+    padding: 12px 14px; background: #fff; border: 1px solid #d0d7de;
+    border-radius: 6px; margin-bottom: 12px;
+  }
+  .group { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+  .group-label {
+    font-size: 10px; font-weight: 700; color: #57606a;
+    letter-spacing: 0.06em; text-transform: uppercase;
+  }
+  .search-input {
+    padding: 6px 10px; font-size: 13px; border: 1px solid #d0d7de;
+    border-radius: 4px; min-width: 240px; outline: none;
+  }
+  .search-input:focus { border-color: #0969da; box-shadow: 0 0 0 2px #0969da22; }
+  .chips { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 3px 8px; font-size: 12px; border-radius: 12px;
+    background: #eaeef2; color: #57606a; cursor: pointer;
+    user-select: none; border: 1px solid transparent;
+  }
+  .chip.on { background: #fff; color: #1f2328; border-color: #d0d7de; }
+  .chip input { margin: 0; accent-color: #0969da; }
+  .toggles { display: flex; gap: 14px; align-items: center; }
+  .toggles label {
+    font-size: 12px; display: inline-flex; align-items: center;
+    gap: 5px; cursor: pointer;
+  }
+  .stats {
+    font-size: 12px; color: #57606a; line-height: 1.6;
+  }
+  .stats strong { color: #1f2328; font-size: 16px; }
+  .chart-wrap {
+    background: #fff; border: 1px solid #d0d7de; border-radius: 6px;
+    padding: 12px; overflow-x: auto;
+  }
+  svg { display: block; }
+  .op-rect { cursor: default; transition: opacity 120ms ease; }
+  .op-rect:hover { stroke-width: 2; }
+  .row-label { font-size: 13px; font-weight: 500; fill: #1f2328; }
+  .row-label-op { fill: #6e7681; }
+  .axis-tick { font-size: 11px; fill: #6e7681; }
+  .row-bg-machine { fill: #fbfcfd; }
+  .row-bg-operator { fill: #f6f7f9; }
+  .row-divider { stroke: #eaeef2; stroke-width: 1; }
+  .grid-line { stroke: #f0f2f4; }
+  .tooltip {
+    position: fixed; background: #1f2328; color: #fff;
+    padding: 8px 11px; border-radius: 5px; font-size: 12px;
+    line-height: 1.55; pointer-events: none;
+    box-shadow: 0 6px 20px rgba(0,0,0,0.25); z-index: 1000;
+    min-width: 220px;
+  }
+  .tooltip .header {
+    font-weight: 600; padding-bottom: 5px; margin-bottom: 5px;
+    border-bottom: 1px solid #4d535b;
+  }
+  .tooltip .key { color: #9da3ab; display: inline-block; min-width: 78px; }
+  .empty {
+    background: #fff; border: 1px solid #d0d7de; border-radius: 6px;
+    padding: 28px; text-align: center; color: #6e7681; font-size: 14px;
+  }
+  .empty code {
+    background: #f6f7f9; padding: 2px 6px; border-radius: 3px;
+    font-family: ui-monospace, monospace;
+  }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel" data-presets="react">
+const { useState, useMemo } = React;
+
+const ROW_HEIGHT = 44;
+const TOP_PAD = 36;
+const LEFT_PAD = 90;
+const RIGHT_PAD = 16;
+const PX_PER_UNIT = 60;
+
+const jobColor = (jobId) => `hsl(${(jobId * 137) % 360}, 62%, 48%)`;
+
+// Convert a list of available windows into the complementary "unavailable" gaps.
+function gaps(windows, horizon) {
+  const sorted = [...windows].sort((a, b) => a[0] - b[0]);
+  const out = [];
+  if (sorted[0][0] > 0) out.push([0, sorted[0][0]]);
+  for (let i = 0; i < sorted.length - 1; i++) {
+    if (sorted[i + 1][0] > sorted[i][1]) {
+      out.push([sorted[i][1], sorted[i + 1][0]]);
+    }
+  }
+  const last = sorted[sorted.length - 1][1];
+  if (last < horizon) out.push([last, horizon]);
+  return out;
+}
+
+function toggle(set, value, setter) {
+  const next = new Set(set);
+  if (next.has(value)) next.delete(value); else next.add(value);
+  setter(next);
+}
+
+function searchHaystack(op) {
+  return [
+    `j${op.job_id}`, `job ${op.job_id}`,
+    `o(${op.job_id},${op.op_idx})`, `o${op.op_idx}`,
+    `p${op.product_id}`, `product ${op.product_id}`,
+    `m${op.machine}`, `machine ${op.machine}`,
+    `op${op.operator}`, `operator ${op.operator}`,
+  ].join(" ").toLowerCase();
+}
+
+function Tooltip({ op, x, y }) {
+  const procDuration = op.end - op.proc_start;
+  const setupDesc = op.setup_duration > 0
+    ? `${op.setup_duration}u  (${op.start} → ${op.proc_start})`
+    : "none";
+  return (
+    <div className="tooltip" style={{ left: x + 14, top: y + 14 }}>
+      <div className="header" style={{ color: jobColor(op.job_id) }}>
+        Job {op.job_id} — Operation {op.op_idx}
+      </div>
+      <div><span className="key">Product:</span> P{op.product_id}</div>
+      <div><span className="key">Machine:</span> M{op.machine}</div>
+      <div><span className="key">Operator:</span> Op{op.operator}</div>
+      <div><span className="key">Setup:</span> {setupDesc}</div>
+      <div><span className="key">Processing:</span> {procDuration}u  ({op.proc_start} → {op.end})</div>
+      <div><span className="key">Total block:</span> {op.start} → {op.end}</div>
+    </div>
+  );
+}
+
+function Chip({ checked, onChange, label, color }) {
+  const tint = color
+    ? { backgroundColor: checked ? color + "26" : "#eaeef2",
+        borderColor: checked ? color : "transparent" }
+    : {};
+  return (
+    <label className={"chip" + (checked ? " on" : "")} style={tint}>
+      <input type="checkbox" checked={checked} onChange={onChange} />
+      {label}
+    </label>
+  );
+}
+
+function App() {
+  const data = window.SCHEDULE_DATA;
+
+  const allJobs = useMemo(
+    () => [...new Set(data.schedule.ops.map(o => o.job_id))].sort((a, b) => a - b),
+    []
+  );
+  const allMachines = useMemo(
+    () => Array.from({ length: data.n_machines }, (_, i) => i),
+    []
+  );
+  const allOperators = useMemo(
+    () => Array.from({ length: data.n_operators }, (_, i) => i),
+    []
+  );
+  const allProducts = useMemo(
+    () => [...new Set(data.schedule.ops.map(o => o.product_id))].sort((a, b) => a - b),
+    []
+  );
+
+  const [search, setSearch] = useState("");
+  const [fJobs, setFJobs] = useState(new Set(allJobs));
+  const [fMachines, setFMachines] = useState(new Set(allMachines));
+  const [fOperators, setFOperators] = useState(new Set(allOperators));
+  const [fProducts, setFProducts] = useState(new Set(allProducts));
+  const [showSetup, setShowSetup] = useState(true);
+  const [showUnavail, setShowUnavail] = useState(true);
+  const [showOperators, setShowOperators] = useState(true);
+  const [hovered, setHovered] = useState(null);
+
+  const horizon = data.horizon;
+  const numRows = data.n_machines + (showOperators ? data.n_operators : 0);
+  const chartHeight = TOP_PAD + numRows * ROW_HEIGHT + 18;
+  const chartWidth = LEFT_PAD + horizon * PX_PER_UNIT + RIGHT_PAD;
+  const timeToX = (t) => LEFT_PAD + t * PX_PER_UNIT;
+
+  const passesFilter = (op) =>
+    fJobs.has(op.job_id) && fMachines.has(op.machine)
+    && fOperators.has(op.operator) && fProducts.has(op.product_id);
+
+  const q = search.trim().toLowerCase();
+  const matchesSearch = (op) => q === "" ? true : searchHaystack(op).includes(q);
+
+  const visibleOps = data.schedule.ops.filter(passesFilter);
+  const matchedCount = visibleOps.filter(matchesSearch).length;
+
+  const tickStep = horizon > 50 ? 5 : horizon > 20 ? 2 : 1;
+  const ticks = [];
+  for (let t = 0; t <= horizon; t += tickStep) ticks.push(t);
+
+  const onHover = (op) => (e) =>
+    setHovered({ op, x: e.clientX, y: e.clientY });
+  const onLeave = () => setHovered(null);
+
+  const dimmed = (op) => q !== "" && !matchesSearch(op);
+
+  return (
+    <div>
+      <h1>FJSP Schedule Viewer  ·  C<sub>max</sub> = {data.schedule.makespan}</h1>
+
+      <div className="toolbar">
+        <div className="group">
+          <span className="group-label">Search</span>
+          <input
+            className="search-input"
+            placeholder="Try: J0  ·  M1  ·  P1  ·  Op0"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </div>
+
+        <div className="group">
+          <span className="group-label">Jobs</span>
+          <div className="chips">
+            {allJobs.map(j => (
+              <Chip key={j} label={`J${j}`} color={jobColor(j)}
+                checked={fJobs.has(j)}
+                onChange={() => toggle(fJobs, j, setFJobs)} />
+            ))}
+          </div>
+        </div>
+
+        <div className="group">
+          <span className="group-label">Machines</span>
+          <div className="chips">
+            {allMachines.map(m => (
+              <Chip key={m} label={`M${m}`}
+                checked={fMachines.has(m)}
+                onChange={() => toggle(fMachines, m, setFMachines)} />
+            ))}
+          </div>
+        </div>
+
+        <div className="group">
+          <span className="group-label">Operators</span>
+          <div className="chips">
+            {allOperators.map(o => (
+              <Chip key={o} label={`Op${o}`}
+                checked={fOperators.has(o)}
+                onChange={() => toggle(fOperators, o, setFOperators)} />
+            ))}
+          </div>
+        </div>
+
+        <div className="group">
+          <span className="group-label">Products</span>
+          <div className="chips">
+            {allProducts.map(p => (
+              <Chip key={p} label={`P${p}`}
+                checked={fProducts.has(p)}
+                onChange={() => toggle(fProducts, p, setFProducts)} />
+            ))}
+          </div>
+        </div>
+
+        <div className="group">
+          <span className="group-label">View</span>
+          <div className="toggles">
+            <label><input type="checkbox" checked={showSetup}
+              onChange={(e) => setShowSetup(e.target.checked)} /> Setup</label>
+            <label><input type="checkbox" checked={showUnavail}
+              onChange={(e) => setShowUnavail(e.target.checked)} /> Unavailability</label>
+            <label><input type="checkbox" checked={showOperators}
+              onChange={(e) => setShowOperators(e.target.checked)} /> Operators</label>
+          </div>
+        </div>
+
+        <div className="group" style={{ marginLeft: "auto", textAlign: "right" }}>
+          <span className="group-label">Match</span>
+          <div className="stats">
+            <strong>{matchedCount}</strong> / {data.schedule.ops.length} ops
+            {q && <div style={{ fontSize: 11 }}>matching "{q}"</div>}
+          </div>
+        </div>
+      </div>
+
+      <div className="chart-wrap">
+        <svg width={chartWidth} height={chartHeight}>
+          <defs>
+            <pattern id="hatch" patternUnits="userSpaceOnUse"
+              width="6" height="6" patternTransform="rotate(45)">
+              <line x1="0" y1="0" x2="0" y2="6" stroke="#b1bac4" strokeWidth="2" />
+            </pattern>
+          </defs>
+
+          {/* Time axis */}
+          <line x1={LEFT_PAD} y1={TOP_PAD - 8}
+            x2={LEFT_PAD + horizon * PX_PER_UNIT} y2={TOP_PAD - 8}
+            stroke="#b1bac4" />
+          {ticks.map(t => (
+            <g key={`tick-${t}`}>
+              <line x1={timeToX(t)} y1={TOP_PAD - 8}
+                x2={timeToX(t)} y2={TOP_PAD - 4} stroke="#b1bac4" />
+              <text x={timeToX(t)} y={TOP_PAD - 12}
+                textAnchor="middle" className="axis-tick">{t}</text>
+            </g>
+          ))}
+
+          {/* Machine rows */}
+          {allMachines.map(m => {
+            const y = TOP_PAD + m * ROW_HEIGHT;
+            return (
+              <g key={`m-${m}`}>
+                <rect x={LEFT_PAD} y={y}
+                  width={horizon * PX_PER_UNIT} height={ROW_HEIGHT}
+                  className="row-bg-machine" />
+                <line x1={LEFT_PAD} y1={y + ROW_HEIGHT}
+                  x2={LEFT_PAD + horizon * PX_PER_UNIT} y2={y + ROW_HEIGHT}
+                  className="row-divider" />
+                <text x={LEFT_PAD - 12} y={y + ROW_HEIGHT/2 + 4}
+                  textAnchor="end" className="row-label">M{m}</text>
+              </g>
+            );
+          })}
+
+          {/* Operator rows */}
+          {showOperators && allOperators.map(o => {
+            const y = TOP_PAD + (data.n_machines + o) * ROW_HEIGHT;
+            return (
+              <g key={`o-${o}`}>
+                <rect x={LEFT_PAD} y={y}
+                  width={horizon * PX_PER_UNIT} height={ROW_HEIGHT}
+                  className="row-bg-operator" />
+                <line x1={LEFT_PAD} y1={y + ROW_HEIGHT}
+                  x2={LEFT_PAD + horizon * PX_PER_UNIT} y2={y + ROW_HEIGHT}
+                  className="row-divider" />
+                <text x={LEFT_PAD - 12} y={y + ROW_HEIGHT/2 + 4}
+                  textAnchor="end" className="row-label row-label-op">Op{o}</text>
+              </g>
+            );
+          })}
+
+          {/* Vertical gridlines */}
+          {ticks.map(t => (
+            <line key={`grid-${t}`}
+              x1={timeToX(t)} y1={TOP_PAD}
+              x2={timeToX(t)} y2={TOP_PAD + numRows * ROW_HEIGHT}
+              className="grid-line" />
+          ))}
+
+          {/* Machine unavailability bands */}
+          {showUnavail && allMachines.map(m => {
+            if (!fMachines.has(m)) return null;
+            const y = TOP_PAD + m * ROW_HEIGHT + 4;
+            return gaps(data.machine_windows[m], horizon).map(([a, b], i) => (
+              <rect key={`umach-${m}-${i}`}
+                x={timeToX(a)} y={y}
+                width={(b - a) * PX_PER_UNIT} height={ROW_HEIGHT - 8}
+                fill="url(#hatch)" stroke="#b1bac4" strokeWidth="0.5" />
+            ));
+          })}
+          {showUnavail && showOperators && allOperators.map(o => {
+            if (!fOperators.has(o)) return null;
+            const y = TOP_PAD + (data.n_machines + o) * ROW_HEIGHT + 4;
+            return gaps(data.operator_windows[o], horizon).map(([a, b], i) => (
+              <rect key={`uop-${o}-${i}`}
+                x={timeToX(a)} y={y}
+                width={(b - a) * PX_PER_UNIT} height={ROW_HEIGHT - 8}
+                fill="url(#hatch)" stroke="#b1bac4" strokeWidth="0.5" />
+            ));
+          })}
+
+          {/* Operations */}
+          {visibleOps.map(op => {
+            const dim = dimmed(op);
+            const opacity = dim ? 0.15 : 1.0;
+            const color = jobColor(op.job_id);
+            const yMachine = TOP_PAD + op.machine * ROW_HEIGHT + 4;
+            const yOperator = TOP_PAD + (data.n_machines + op.operator) * ROW_HEIGHT + 4;
+            const procX = timeToX(op.proc_start);
+            const procW = (op.end - op.proc_start) * PX_PER_UNIT;
+            const setupX = timeToX(op.start);
+            const setupW = op.setup_duration * PX_PER_UNIT;
+            const handlers = {
+              onMouseEnter: onHover(op),
+              onMouseMove: onHover(op),
+              onMouseLeave: onLeave,
+            };
+            const showLabel = procW > 32 && !dim;
+            return (
+              <g key={`${op.job_id}-${op.op_idx}`}>
+                {showSetup && op.setup_duration > 0 && (
+                  <rect className="op-rect"
+                    x={setupX} y={yMachine}
+                    width={setupW} height={ROW_HEIGHT - 8}
+                    fill={color} opacity={opacity * 0.3}
+                    stroke="#000" strokeWidth="0.5"
+                    {...handlers} />
+                )}
+                <rect className="op-rect"
+                  x={procX} y={yMachine}
+                  width={procW} height={ROW_HEIGHT - 8}
+                  fill={color} opacity={opacity}
+                  stroke="#000" strokeWidth="0.5"
+                  {...handlers} />
+                {showLabel && (
+                  <text x={procX + procW / 2}
+                    y={yMachine + (ROW_HEIGHT - 8) / 2 + 4}
+                    textAnchor="middle"
+                    fill="#fff" fontSize="11" fontWeight="500"
+                    pointerEvents="none">
+                    J{op.job_id}-O{op.op_idx}
+                  </text>
+                )}
+                {showOperators && (
+                  <rect className="op-rect"
+                    x={procX} y={yOperator}
+                    width={procW} height={ROW_HEIGHT - 8}
+                    fill={color} opacity={opacity * 0.85}
+                    stroke="#000" strokeWidth="0.5"
+                    {...handlers} />
+                )}
+              </g>
+            );
+          })}
+        </svg>
+      </div>
+
+      {hovered && <Tooltip op={hovered.op} x={hovered.x} y={hovered.y} />}
+    </div>
+  );
+}
+
+if (!window.SCHEDULE_DATA) {
+  document.getElementById("root").innerHTML =
+    '<div class="empty">No schedule data found.<br/>' +
+    'Run <code>uv run fjsp</code> from the project root to generate ' +
+    '<code>web/data.js</code>, then reload this page.</div>';
+} else {
+  ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+}
+</script>
+</body>
+</html>

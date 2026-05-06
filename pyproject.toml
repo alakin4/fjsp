@@ -1,0 +1,16 @@
+[project]
+name = "fjsp"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "matplotlib>=3.10.9",
+]
+
+[project.scripts]
+fjsp = "fjsp:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
