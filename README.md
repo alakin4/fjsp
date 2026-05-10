@@ -6,14 +6,16 @@ Adaptive Search Procedure) for an **extended Flexible Job-Shop Problem**
 product-dependent setup times — are the kind of constraints that make
 real shop-floor problems harder than the textbook FJSP.
 
-The code is organized into three components:
+The code is organized into three layers — **input** (data), **solver**
+(GRASP), and **output** (visualization & export):
 
-| Component                | File                                                       | Role                                          |
-| ------------------------ | ---------------------------------------------------------- | --------------------------------------------- |
-| Data                     | [src/fjsp/data.py](src/fjsp/data.py)                       | Instance representation + the toy example     |
-| Solver                   | [src/fjsp/solver.py](src/fjsp/solver.py)                   | GRASP: construction + local search            |
-| Visualization (static)   | [src/fjsp/visualization.py](src/fjsp/visualization.py)     | Matplotlib Gantt with availability + setups   |
-| Visualization (interactive) | [web/index.html](web/index.html) + [src/fjsp/export.py](src/fjsp/export.py) | React-based Gantt with search, filters, tooltips |
+| Layer       | Modules                                                                                                                   | Role                                                            |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
+| Input       | [src/fjsp/input/domain.py](src/fjsp/input/domain.py), [io.py](src/fjsp/input/io.py), [generator.py](src/fjsp/input/generator.py) | Domain types · JSON load/save · `toy_instance()` and `random_instance()` |
+| Solver      | [src/fjsp/solver.py](src/fjsp/solver.py)                                                                                  | GRASP construction + local search, with running-op pinning      |
+| Output      | [src/fjsp/output/gantt.py](src/fjsp/output/gantt.py), [web_export.py](src/fjsp/output/web_export.py), [web/index.html](web/index.html) | Matplotlib Gantt · React viewer with search, filters, tooltips |
+| CLI         | [src/fjsp/cli.py](src/fjsp/cli.py)                                                                                        | `fjsp solve` · `fjsp generate` · `fjsp inspect` (click-based)   |
+| Instances   | [instances/](instances/)                                                                                                  | One JSON file per instance                                      |
 
 The implementation follows the canonical formulation from
 **Resende & Ribeiro (2016)**, *Optimization by GRASP* (in [docs/](docs/)).
@@ -70,10 +72,31 @@ These three constraints are exactly the family of conditions that
 Cartes & Medina (2016) handles for surgery scheduling (rooms = machines,
 surgeons/nurses = operators, surgical-team compatibility ≈ setups).
 
-### 1.3 Toy instance
+### 1.3 Domain model
 
-The instance built by `toy_instance()` in [src/fjsp/data.py](src/fjsp/data.py)
-has 2 jobs, 2 machines, 2 operators, 2 products:
+The relational shape of an instance — mirroring how the data would live
+in a real shop's database — is in
+[src/fjsp/input/domain.py](src/fjsp/input/domain.py):
+
+| Type           | Real-world counterpart                                                       |
+| -------------- | ---------------------------------------------------------------------------- |
+| `Product`      | one of the manufactured product types, with an ordered list of `Stage`s     |
+| `Stage`        | one production step + the eligible machines and per-machine processing time |
+| `Machine`      | a machine, its availability windows, its setup matrix, and the product it currently/last processed |
+| `Operator`     | a worker: which machines they can run, and their shift availability         |
+| `Order`        | a customer order = a job; product + deadline + a real-time `OrderStatus`    |
+| `OrderStatus`  | `pending` / `running` / `completed` plus running-op pin info                |
+| `Instance`     | the full bundle: products + machines + operators + orders + horizon         |
+
+Instances are loaded from / saved to JSON via
+[`load_instance`](src/fjsp/input/io.py) / [`save_instance`](src/fjsp/input/io.py).
+The JSON schema is documented in [instances/README.md](instances/README.md).
+
+### 1.4 Toy instance
+
+The instance built by `toy_instance()` in
+[src/fjsp/input/generator.py](src/fjsp/input/generator.py) and saved as
+[instances/toy.json](instances/toy.json) has 2 jobs, 2 machines, 2 operators, 2 products:
 
 | Operation | Product | M0 (proc) | M1 (proc) | Eligible operators |
 | --------- | ------- | --------- | --------- | ------------------ |
@@ -87,8 +110,10 @@ Availability:
 - **M0**: always available.
 - **M1**: available `[0, 3)` ∪ `[5, ∞)` — maintenance closes M1 in
   `[3, 5)`.
-- **Op0**: available `[0, 4)` ∪ `[6, ∞)` — lunch break in `[4, 6)`.
-- **Op1**: always available.
+- **Op0**: available `[0, 4)` ∪ `[7, ∞)` — lunch break in `[4, 7)`.
+- **Op1**: available `[0, 5)` ∪ `[7, ∞)` — lunch break in `[5, 7)`.
+
+Both operators can run both machines.
 
 Setup matrix `s(prev, curr)` (same on both machines):
 
@@ -248,7 +273,14 @@ that fits.
 | 25–28 | Advance state. The "adaptive" property: future RCLs depend on what we just chose.                                      |
 
 This corresponds to `construct(...)` at
-[src/fjsp/solver.py:73](src/fjsp/solver.py:73).
+[src/fjsp/solver.py:168](src/fjsp/solver.py:168). Note that lines 2–5
+of the pseudocode are not literally `0` everywhere — they come from
+[`_initial_state`](src/fjsp/solver.py:111), which seeds the clocks from
+the instance's `OrderStatus`: machines and operators that are tied up
+on a `running` op are pinned busy until that op's expected end, and
+each machine's `current_product_id` is propagated into
+`machine_last_product` so the first newly-scheduled op pays the right
+setup. See §5.5.
 
 ### 4.3 One-step trace on the toy instance, α = 0.3
 
@@ -262,7 +294,7 @@ machine has run anything yet). I'll list end times:
 | Candidate                  | block (setup + proc) | window check                | start | end |
 | -------------------------- | -------------------- | --------------------------- | ----- | --- |
 | O(0,0), M0, Op0            | 0 + 3 = 3            | M0 ok, Op0 [0,4] fits       | 0     | 3   |
-| O(0,0), M0, Op1            | 0 + 3 = 3            | both ok                     | 0     | 3   |
+| O(0,0), M0, Op1            | 0 + 3 = 3            | M0 ok, Op1 [0,5] fits       | 0     | 3   |
 | O(0,0), M1, Op0            | 0 + 2 = 2            | M1 [0,3] fits, Op0 ok       | 0     | **2** |
 | O(0,0), M1, Op1            | 0 + 2 = 2            | both ok                     | 0     | **2** |
 | O(1,0), M0, Op0            | 0 + 4 = 4            | M0 ok, Op0 [0,4] *just* fits | 0     | 4   |
@@ -314,11 +346,66 @@ it. We use **first-improvement** on two natural FJSP neighborhoods:
 The key invariant: **the operation order is held fixed during local
 search**. Only the machine or operator assignment of one op changes at
 a time; everything else is recomputed by replaying that order
-(`simulate(...)` at [src/fjsp/solver.py:125](src/fjsp/solver.py:125)).
+(`simulate(...)` at [src/fjsp/solver.py:233](src/fjsp/solver.py:233)).
 This makes each move cheap: O(|ops|) per evaluation.
 
+When `N_M` switches an op to a machine the current operator can't run,
+the local search picks any eligible operator for that machine on the
+fly; otherwise the move would be invalid by construction.
+
 This corresponds to `local_search(...)` at
-[src/fjsp/solver.py:164](src/fjsp/solver.py:164).
+[src/fjsp/solver.py:278](src/fjsp/solver.py:278).
+
+### 5.5 Real-time status: per-stage state
+
+State is tracked **per stage**, not per order. Each `Order.status`
+([OrderStatus](src/fjsp/input/domain.py)) carries two lists:
+
+```python
+@dataclass
+class OrderStatus:
+    completed: list[StageHistory]   # already finished
+    running:   list[StageHistory]   # currently in progress
+    # pending = derived = all_stages − completed − running
+```
+
+A `StageHistory` is `(stage_idx, machine_id, operator_id, start, end,
+setup_duration)`. For completed entries `end` is the actual finish time
+(typically ≤ 0 in solver-clock terms — the past). For running entries
+`end` is the *expected* finish time (typically ≥ 0).
+
+How [`_initial_state`](src/fjsp/solver.py) seeds the solver clocks:
+
+| For each…           | Effect on the solver                                                                                                                               |
+| ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **completed** stage | Doesn't pin anything. *Updates* `machine_last_product[m]` if it's the most recently ended completed/running stage on that machine — so the first newly-scheduled op on `m` pays the right setup. |
+| **running** stage   | Pins `machine_end[m] = h.end`, `operator_end[o] = h.end`, propagates `machine_last_product[m] = order.product_id`, advances `job_ready[j] = h.end`. |
+| `next_op_idx[j]`    | Smallest stage index *not* in completed ∪ running. (For FJSP, completed and running form a prefix.)                                                |
+
+`Machine.current_product_id` is the analogous field at the *machine*
+level — what was on the machine before any order's history applies (e.g.,
+a machine that finished a now-completed job). The seed is:
+
+```python
+machine_last_product = [m.current_product_id for m in instance.machines]
+# then, in time order, completed/running stages overwrite their machine's slot
+```
+
+#### Visualization across all three states
+
+The solver itself only outputs **pending** ops (its decisions). For
+display, [`combined_ops(instance, sched)`](src/fjsp/solver.py)
+merges the OrderStatus history with the solver's output into a single
+list, each `ScheduledOp` carrying a `state` field
+(`"completed"` / `"running"` / `"pending"`). Both the matplotlib Gantt
+and the React viewer consume this combined list, so completed and
+running stages are always visible — with distinct visual styles
+(dashed green border, thick blue border, and solid black respectively).
+The chart's time axis extends into negative territory automatically if
+any completed stage started before t = 0, with a "now" marker at t = 0.
+
+[`total_makespan(instance, sched)`](src/fjsp/solver.py) is the final
+`Cmax` across **all** ops including running — the figure the CLI prints.
 
 > The Resende & Ribeiro book also discusses *best-improvement* and
 > Variable Neighborhood Descent (VND); first-improvement is the
@@ -338,73 +425,102 @@ fjsp/
 │   ├── 1-s2.0-S1568494621000740-main.pdf  # Cildoz et al. 2021 — GRASP for ER scheduling
 │   └── cartes2016.pdf               # Cartes & Medina 2016 — GRASP for surgery scheduling
 ├── pyproject.toml                   # uv-managed
+├── instances/                       # one JSON per FJSP instance
+│   ├── README.md                    # JSON schema + how to generate
+│   └── toy.json                     # the canonical toy
 ├── src/fjsp/
-│   ├── data.py                      # Operation, FJSPInstance, toy_instance()
-│   ├── solver.py                    # construct, local_search, simulate, grasp
-│   ├── visualization.py             # plot_gantt (matplotlib)
-│   ├── export.py                    # export_web_data — writes web/data.js
-│   └── __init__.py                  # exports + `uv run fjsp` entry point
+│   ├── input/                       # data layer
+│   │   ├── domain.py                # Stage, Product, Machine, Operator,
+│   │   │                            # Order, OrderStatus, Instance
+│   │   ├── io.py                    # load_instance, save_instance
+│   │   └── generator.py             # toy_instance, random_instance
+│   ├── solver.py                    # construct, local_search, simulate,
+│   │                                # grasp, OperationView, _initial_state
+│   ├── output/                      # output layer
+│   │   ├── gantt.py                 # plot_gantt (matplotlib)
+│   │   └── web_export.py            # export_web_data — writes web/data.js
+│   ├── cli.py                       # click CLI: solve, generate, inspect
+│   └── __init__.py                  # public API + `uv run fjsp` entry
 └── web/
-    ├── index.html                   # React viewer (loaded via CDN, no build step)
+    ├── index.html                   # React viewer (CDN, no build step)
     └── data.js                      # generated by `uv run fjsp`
 ```
 
 ### API at a glance
 
 ```python
-from fjsp import toy_instance, grasp, plot_gantt
+from fjsp import (
+    toy_instance, random_instance, load_instance, save_instance,
+    grasp, plot_gantt, export_web_data,
+)
 
-inst  = toy_instance()
+inst  = load_instance("instances/toy.json")    # or toy_instance()
 sched = grasp(inst, max_iter=200, alpha=0.3, seed=0)
 plot_gantt(sched, inst, save_path="gantt.png")
+export_web_data(inst, sched, "web/data.js")
 ```
 
 Where things live in [solver.py](src/fjsp/solver.py):
 
-| GRASP concept                           | Code                                   |
-| --------------------------------------- | -------------------------------------- |
-| Top-level multistart loop               | `grasp` (line 216)                     |
-| Semi-greedy construction (RCL)          | `construct` (line 73)                  |
-| `RCL = { c : g(c) ≤ g_min + α(g_max-g_min) }` | line 109                          |
-| Earliest feasible start under windows   | `_earliest_feasible_start` (line 49)   |
-| Schedule replay (used by local search)  | `simulate` (line 125)                  |
-| Local search on N_M and N_O             | `local_search` (line 164)              |
+| GRASP concept                                | Code                                          |
+| -------------------------------------------- | --------------------------------------------- |
+| Top-level multistart loop                    | `grasp` (line 343)                            |
+| Semi-greedy construction (RCL)               | `construct` (line 168)                        |
+| `RCL = { c : g(c) ≤ g_min + α(g_max-g_min)}` | line 217                                      |
+| Earliest feasible start under windows        | `_earliest_feasible_start` (line 73)          |
+| Operator–machine eligibility lookup          | `_eligible_operators` (line 95)               |
+| Initial state from `OrderStatus`             | `_initial_state` (line 111)                   |
+| Schedule replay (used by local search)       | `simulate` (line 233)                         |
+| Local search on N_M and N_O                  | `local_search` (line 278)                     |
 
 ---
 
 ## 7. Run it
 
-The project is managed with **uv**.
+The project is managed with **uv** and the CLI is a click app.
 
 ```bash
-uv sync                           # install dependencies
-uv run fjsp                       # solve the toy instance, save gantt.png
+uv sync                                       # install dependencies
+uv run fjsp solve -i instances/toy.json       # solve a saved instance
+uv run fjsp generate \
+    --name small-1 --products 4 --machines 5 --operators 4 --orders 10 \
+    --seed 0 -o instances/small-1.json        # write a fresh synthetic instance
+uv run fjsp inspect instances/small-1.json    # print a summary
+uv run fjsp                                   # shortcut: solve instances/toy.json
 ```
 
-Sample output on the toy instance with `seed=0, α=0.3, max_iter=200`:
+Three subcommands today (`fjsp --help` lists them):
+
+| Subcommand    | What it does                                                         |
+| ------------- | -------------------------------------------------------------------- |
+| `solve`       | Read an instance JSON, run GRASP, save Gantt + React data            |
+| `generate`    | Build a parametric synthetic instance and write it as JSON           |
+| `inspect`     | Print a human-readable summary of an instance                        |
+
+Sample output on the toy with `seed=0, α=0.3, max_iter=200`:
 
 ```
-Cmax = 9
-op             mach  op#   setup  proc_start  end
-O(0,0)[P0]     M0    Op1   0      0           3
-O(0,1)[P0]     M0    Op1   0      3           5
-O(1,0)[P1]     M1    Op0   0      0           3
-O(1,1)[P1]     M0    Op1   1      6           9
+Loaded instance 'toy' from instances/toy.json
+  products=2  machines=2  operators=2  orders=2
+Cmax = 11
+  op             mach  op#   setup  proc_start  end
+  O(0,0)[P0]     M0    Op1   0      0           3
+  O(0,1)[P0]     M0    Op1   0      3           5
+  O(1,0)[P1]     M1    Op0   0      0           3
+  O(1,1)[P1]     M0    Op1   1      8           11
 ```
 
 Reading the schedule:
 
 - `O(0,0)` runs on M0/Op1, [0, 3]. M0 last product = P0.
 - `O(0,1)` runs on M0/Op1, [3, 5]. P0→P0, setup 0.
-- `O(1,0)` runs on M1/Op0, [0, 3]. Fits inside M1's first window
-  `[0, 3)`; Op0 is fine (not yet on lunch break).
-- `O(1,1)` runs on M0/Op1, setup [5, 6] (P0→P1 = 1) then processing
-  [6, 9]. Note: O(1,1) was *moved* off M1 — although M1 returns at 5,
-  M1 has p = 5 for O(1,1) (longer), and a P1→P1 setup of 0 on M1 vs.
-  P0→P1 setup of 1 on M0 still nets a worse Cmax. The local search
-  finds this.
+- `O(1,0)` runs on M1/Op0, [0, 3]. Fits inside M1's first window `[0, 3)`;
+  Op0 is on shift `[0, 4)`.
+- `O(1,1)` runs on M0/Op1: must wait for Op1 to come back from lunch at 7,
+  then P0→P1 setup [7, 8], processing [8, 11]. Op0 also unavailable until 7,
+  so M1 (back at 5) can't be used either.
 
-Cmax = 9.
+Cmax = 11.
 
 The Gantt chart (`gantt.png`) shows machine and operator timelines on
 separate rows. Setup blocks appear as faded segments before the

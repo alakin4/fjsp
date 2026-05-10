@@ -44,10 +44,25 @@
     font-size: 12px; display: inline-flex; align-items: center;
     gap: 5px; cursor: pointer;
   }
-  .stats {
-    font-size: 12px; color: #57606a; line-height: 1.6;
-  }
+  .stats { font-size: 12px; color: #57606a; line-height: 1.6; }
   .stats strong { color: #1f2328; font-size: 16px; }
+
+  .time-range { display: flex; flex-direction: column; gap: 4px; min-width: 280px; }
+  .time-range input[type="range"] {
+    width: 100%; margin: 0;
+    accent-color: #0969da;
+  }
+  .time-range-meta {
+    display: flex; justify-content: space-between;
+    font-size: 11px; color: #57606a; align-items: center; gap: 8px;
+  }
+  .time-range-meta button {
+    font-size: 11px; padding: 2px 8px; border: 1px solid #d0d7de;
+    background: #fff; border-radius: 3px; cursor: pointer; color: #57606a;
+  }
+  .time-range-meta button:hover { background: #f6f7f9; color: #1f2328; }
+  .time-range-meta strong { color: #1f2328; }
+
   .chart-wrap {
     background: #fff; border: 1px solid #d0d7de; border-radius: 6px;
     padding: 12px; overflow-x: auto;
@@ -62,6 +77,15 @@
   .row-bg-operator { fill: #f6f7f9; }
   .row-divider { stroke: #eaeef2; stroke-width: 1; }
   .grid-line { stroke: #f0f2f4; }
+
+  .legend {
+    display: flex; gap: 18px; flex-wrap: wrap; padding: 8px 14px;
+    margin-top: 8px; background: #fff; border: 1px solid #d0d7de;
+    border-radius: 6px; font-size: 12px; color: #57606a;
+  }
+  .legend-swatch { display: inline-flex; align-items: center; gap: 6px; }
+  .legend-swatch svg { display: block; }
+
   .tooltip {
     position: fixed; background: #1f2328; color: #fff;
     padding: 8px 11px; border-radius: 5px; font-size: 12px;
@@ -96,20 +120,40 @@ const LEFT_PAD = 90;
 const RIGHT_PAD = 16;
 const PX_PER_UNIT = 60;
 
+const ALL_STATES = ["completed", "running", "pending"];
+const stateColor = {
+  pending:   "#9aa4b1",
+  running:   "#0969da",
+  completed: "#1a7f37",
+};
+
+// Style descriptors per op state. Borders carry the state signal so the
+// job color is preserved.
+function stateStyle(state) {
+  if (state === "completed") {
+    return { stroke: "#1a7f37", strokeWidth: 1.5, dasharray: "4 3", alpha: 0.55 };
+  }
+  if (state === "running") {
+    return { stroke: "#0969da", strokeWidth: 2.2, dasharray: "", alpha: 1.0 };
+  }
+  return { stroke: "#000", strokeWidth: 0.5, dasharray: "", alpha: 1.0 };
+}
+
 const jobColor = (jobId) => `hsl(${(jobId * 137) % 360}, 62%, 48%)`;
 
-// Convert a list of available windows into the complementary "unavailable" gaps.
-function gaps(windows, horizon) {
+// Inverted intervals: when the resource is unavailable inside [lo, hi].
+function gaps(windows, lo, hi) {
   const sorted = [...windows].sort((a, b) => a[0] - b[0]);
   const out = [];
-  if (sorted[0][0] > 0) out.push([0, sorted[0][0]]);
-  for (let i = 0; i < sorted.length - 1; i++) {
-    if (sorted[i + 1][0] > sorted[i][1]) {
-      out.push([sorted[i][1], sorted[i + 1][0]]);
-    }
+  let cursor = lo;
+  for (const [a, b] of sorted) {
+    if (b <= lo) continue;
+    if (a >= hi) break;
+    const wa = Math.max(a, lo), wb = Math.min(b, hi);
+    if (wa > cursor) out.push([cursor, wa]);
+    cursor = Math.max(cursor, wb);
   }
-  const last = sorted[sorted.length - 1][1];
-  if (last < horizon) out.push([last, horizon]);
+  if (cursor < hi) out.push([cursor, hi]);
   return out;
 }
 
@@ -126,6 +170,7 @@ function searchHaystack(op) {
     `p${op.product_id}`, `product ${op.product_id}`,
     `m${op.machine}`, `machine ${op.machine}`,
     `op${op.operator}`, `operator ${op.operator}`,
+    op.state || "",
   ].join(" ").toLowerCase();
 }
 
@@ -134,11 +179,13 @@ function Tooltip({ op, x, y }) {
   const setupDesc = op.setup_duration > 0
     ? `${op.setup_duration}u  (${op.start} → ${op.proc_start})`
     : "none";
+  const status = op.state || "pending";
   return (
     <div className="tooltip" style={{ left: x + 14, top: y + 14 }}>
       <div className="header" style={{ color: jobColor(op.job_id) }}>
         Job {op.job_id} — Operation {op.op_idx}
       </div>
+      <div><span className="key">State:</span> <span style={{color: stateColor[status], fontWeight: 600}}>{status}</span></div>
       <div><span className="key">Product:</span> P{op.product_id}</div>
       <div><span className="key">Machine:</span> M{op.machine}</div>
       <div><span className="key">Operator:</span> Op{op.operator}</div>
@@ -162,8 +209,71 @@ function Chip({ checked, onChange, label, color }) {
   );
 }
 
+// Small SVG swatches for the legend below the chart.
+function Legend() {
+  return (
+    <div className="legend">
+      <span className="legend-swatch">
+        <svg width="22" height="14">
+          <rect x="0.5" y="0.5" width="21" height="13" fill="#5b8def"
+                stroke="#000" strokeWidth="0.6" />
+        </svg>
+        Pending (scheduled)
+      </span>
+      <span className="legend-swatch">
+        <svg width="22" height="14">
+          <rect x="1" y="1" width="20" height="12" fill="#5b8def"
+                stroke="#0969da" strokeWidth="2" />
+        </svg>
+        ▶ Running
+      </span>
+      <span className="legend-swatch">
+        <svg width="22" height="14">
+          <rect x="1" y="1" width="20" height="12" fill="#5b8def"
+                fillOpacity="0.55" stroke="#1a7f37" strokeWidth="1.5"
+                strokeDasharray="3 2" />
+        </svg>
+        ✓ Completed
+      </span>
+      <span className="legend-swatch">
+        <svg width="22" height="14">
+          <defs>
+            <pattern id="legSetupHatch" patternUnits="userSpaceOnUse"
+                     width="4" height="4" patternTransform="rotate(-45)">
+              <line x1="0" y1="0" x2="0" y2="4"
+                    stroke="rgba(0,0,0,0.55)" strokeWidth="1" />
+            </pattern>
+          </defs>
+          <rect x="0.5" y="0.5" width="21" height="13" fill="#5b8def"
+                fillOpacity="0.4" stroke="#000" strokeWidth="0.6" />
+          <rect x="0.5" y="0.5" width="21" height="13"
+                fill="url(#legSetupHatch)" />
+        </svg>
+        Setup (product changeover)
+      </span>
+      <span className="legend-swatch">
+        <svg width="22" height="14">
+          <defs>
+            <pattern id="legUnavailHatch" patternUnits="userSpaceOnUse"
+                     width="5" height="5" patternTransform="rotate(45)">
+              <line x1="0" y1="0" x2="0" y2="5"
+                    stroke="#b1bac4" strokeWidth="1.5" />
+            </pattern>
+          </defs>
+          <rect x="0.5" y="0.5" width="21" height="13"
+                fill="url(#legUnavailHatch)"
+                stroke="#b1bac4" strokeWidth="0.6" />
+        </svg>
+        Machine / operator unavailable
+      </span>
+    </div>
+  );
+}
+
 function App() {
   const data = window.SCHEDULE_DATA;
+  const horizon = data.horizon;
+  const timeMin = data.time_min ?? 0;
 
   const allJobs = useMemo(
     () => [...new Set(data.schedule.ops.map(o => o.job_id))].sort((a, b) => a - b),
@@ -181,42 +291,71 @@ function App() {
     () => [...new Set(data.schedule.ops.map(o => o.product_id))].sort((a, b) => a - b),
     []
   );
+  // Op-level states (completed / running / pending) actually present.
+  const availableStates = useMemo(() => {
+    const present = new Set(data.schedule.ops.map(o => o.state || "pending"));
+    return ALL_STATES.filter(s => present.has(s));
+  }, []);
 
   const [search, setSearch] = useState("");
   const [fJobs, setFJobs] = useState(new Set(allJobs));
   const [fMachines, setFMachines] = useState(new Set(allMachines));
   const [fOperators, setFOperators] = useState(new Set(allOperators));
   const [fProducts, setFProducts] = useState(new Set(allProducts));
+  const [fStatus, setFStatus] = useState(new Set(availableStates));
+  const [timeFrom, setTimeFrom] = useState(timeMin);
+  const [timeTo, setTimeTo] = useState(horizon);
   const [showSetup, setShowSetup] = useState(true);
   const [showUnavail, setShowUnavail] = useState(true);
   const [showOperators, setShowOperators] = useState(true);
   const [hovered, setHovered] = useState(null);
 
-  const horizon = data.horizon;
   const numRows = data.n_machines + (showOperators ? data.n_operators : 0);
   const chartHeight = TOP_PAD + numRows * ROW_HEIGHT + 18;
-  const chartWidth = LEFT_PAD + horizon * PX_PER_UNIT + RIGHT_PAD;
-  const timeToX = (t) => LEFT_PAD + t * PX_PER_UNIT;
+  const timeSpan = horizon - timeMin;
+  const chartWidth = LEFT_PAD + timeSpan * PX_PER_UNIT + RIGHT_PAD;
+  const timeToX = (t) => LEFT_PAD + (t - timeMin) * PX_PER_UNIT;
+
+  // An op is visible iff its block overlaps [timeFrom, timeTo].
+  const passesTime = (op) => op.start <= timeTo && op.end >= timeFrom;
 
   const passesFilter = (op) =>
-    fJobs.has(op.job_id) && fMachines.has(op.machine)
-    && fOperators.has(op.operator) && fProducts.has(op.product_id);
+    fJobs.has(op.job_id)
+    && fMachines.has(op.machine)
+    && fOperators.has(op.operator)
+    && fProducts.has(op.product_id)
+    && fStatus.has(op.state || "pending")
+    && passesTime(op);
 
   const q = search.trim().toLowerCase();
-  const matchesSearch = (op) => q === "" ? true : searchHaystack(op).includes(q);
+  const matchesSearch = (op) =>
+    q === "" ? true : searchHaystack(op).includes(q);
 
   const visibleOps = data.schedule.ops.filter(passesFilter);
   const matchedCount = visibleOps.filter(matchesSearch).length;
 
-  const tickStep = horizon > 50 ? 5 : horizon > 20 ? 2 : 1;
+  const tickStep = timeSpan > 50 ? 5 : timeSpan > 20 ? 2 : 1;
   const ticks = [];
-  for (let t = 0; t <= horizon; t += tickStep) ticks.push(t);
+  // Round timeMin DOWN to nearest tick boundary so labels align nicely.
+  const tickStart = Math.floor(timeMin / tickStep) * tickStep;
+  for (let t = tickStart; t <= horizon; t += tickStep) ticks.push(t);
 
   const onHover = (op) => (e) =>
     setHovered({ op, x: e.clientX, y: e.clientY });
   const onLeave = () => setHovered(null);
 
   const dimmed = (op) => q !== "" && !matchesSearch(op);
+
+  const onTimeFromChange = (e) => {
+    const v = +e.target.value;
+    setTimeFrom(Math.min(v, timeTo));
+  };
+  const onTimeToChange = (e) => {
+    const v = +e.target.value;
+    setTimeTo(Math.max(v, timeFrom));
+  };
+  const resetTimeRange = () => { setTimeFrom(timeMin); setTimeTo(horizon); };
+  const timeRangeActive = timeFrom > timeMin || timeTo < horizon;
 
   return (
     <div>
@@ -227,7 +366,7 @@ function App() {
           <span className="group-label">Search</span>
           <input
             className="search-input"
-            placeholder="Try: J0  ·  M1  ·  P1  ·  Op0"
+            placeholder="Try: J0  ·  M1  ·  P1  ·  Op0  ·  running"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
@@ -240,6 +379,17 @@ function App() {
               <Chip key={j} label={`J${j}`} color={jobColor(j)}
                 checked={fJobs.has(j)}
                 onChange={() => toggle(fJobs, j, setFJobs)} />
+            ))}
+          </div>
+        </div>
+
+        <div className="group">
+          <span className="group-label">Status</span>
+          <div className="chips">
+            {availableStates.map(s => (
+              <Chip key={s} label={s} color={stateColor[s]}
+                checked={fStatus.has(s)}
+                onChange={() => toggle(fStatus, s, setFStatus)} />
             ))}
           </div>
         </div>
@@ -277,6 +427,20 @@ function App() {
           </div>
         </div>
 
+        <div className="group time-range">
+          <span className="group-label">Time range</span>
+          <input type="range" min={timeMin} max={horizon}
+            value={timeFrom} onChange={onTimeFromChange} />
+          <input type="range" min={timeMin} max={horizon}
+            value={timeTo} onChange={onTimeToChange} />
+          <div className="time-range-meta">
+            <span>From <strong>{timeFrom}</strong></span>
+            <span>To <strong>{timeTo}</strong></span>
+            <button onClick={resetTimeRange}
+              disabled={!timeRangeActive}>reset</button>
+          </div>
+        </div>
+
         <div className="group">
           <span className="group-label">View</span>
           <div className="toggles">
@@ -294,6 +458,11 @@ function App() {
           <div className="stats">
             <strong>{matchedCount}</strong> / {data.schedule.ops.length} ops
             {q && <div style={{ fontSize: 11 }}>matching "{q}"</div>}
+            {timeRangeActive && (
+              <div style={{ fontSize: 11 }}>
+                in [{timeFrom}, {timeTo}]
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -305,11 +474,16 @@ function App() {
               width="6" height="6" patternTransform="rotate(45)">
               <line x1="0" y1="0" x2="0" y2="6" stroke="#b1bac4" strokeWidth="2" />
             </pattern>
+            <pattern id="setupHatch" patternUnits="userSpaceOnUse"
+              width="5" height="5" patternTransform="rotate(-45)">
+              <line x1="0" y1="0" x2="0" y2="5"
+                stroke="rgba(0,0,0,0.55)" strokeWidth="1" />
+            </pattern>
           </defs>
 
           {/* Time axis */}
           <line x1={LEFT_PAD} y1={TOP_PAD - 8}
-            x2={LEFT_PAD + horizon * PX_PER_UNIT} y2={TOP_PAD - 8}
+            x2={LEFT_PAD + timeSpan * PX_PER_UNIT} y2={TOP_PAD - 8}
             stroke="#b1bac4" />
           {ticks.map(t => (
             <g key={`tick-${t}`}>
@@ -320,16 +494,28 @@ function App() {
             </g>
           ))}
 
+          {/* "now" line at t = 0 if any op is in the past */}
+          {timeMin < 0 && (
+            <g pointerEvents="none">
+              <line x1={timeToX(0)} y1={TOP_PAD - 4}
+                x2={timeToX(0)} y2={TOP_PAD + numRows * ROW_HEIGHT}
+                stroke="#0969da" strokeWidth="1" strokeDasharray="2 2"
+                opacity="0.6" />
+              <text x={timeToX(0) + 4} y={TOP_PAD - 18}
+                fontSize="10" fill="#0969da" fontWeight="600">now</text>
+            </g>
+          )}
+
           {/* Machine rows */}
           {allMachines.map(m => {
             const y = TOP_PAD + m * ROW_HEIGHT;
             return (
               <g key={`m-${m}`}>
                 <rect x={LEFT_PAD} y={y}
-                  width={horizon * PX_PER_UNIT} height={ROW_HEIGHT}
+                  width={timeSpan * PX_PER_UNIT} height={ROW_HEIGHT}
                   className="row-bg-machine" />
                 <line x1={LEFT_PAD} y1={y + ROW_HEIGHT}
-                  x2={LEFT_PAD + horizon * PX_PER_UNIT} y2={y + ROW_HEIGHT}
+                  x2={LEFT_PAD + timeSpan * PX_PER_UNIT} y2={y + ROW_HEIGHT}
                   className="row-divider" />
                 <text x={LEFT_PAD - 12} y={y + ROW_HEIGHT/2 + 4}
                   textAnchor="end" className="row-label">M{m}</text>
@@ -343,10 +529,10 @@ function App() {
             return (
               <g key={`o-${o}`}>
                 <rect x={LEFT_PAD} y={y}
-                  width={horizon * PX_PER_UNIT} height={ROW_HEIGHT}
+                  width={timeSpan * PX_PER_UNIT} height={ROW_HEIGHT}
                   className="row-bg-operator" />
                 <line x1={LEFT_PAD} y1={y + ROW_HEIGHT}
-                  x2={LEFT_PAD + horizon * PX_PER_UNIT} y2={y + ROW_HEIGHT}
+                  x2={LEFT_PAD + timeSpan * PX_PER_UNIT} y2={y + ROW_HEIGHT}
                   className="row-divider" />
                 <text x={LEFT_PAD - 12} y={y + ROW_HEIGHT/2 + 4}
                   textAnchor="end" className="row-label row-label-op">Op{o}</text>
@@ -362,11 +548,39 @@ function App() {
               className="grid-line" />
           ))}
 
+          {/* Time-range shading + boundary lines */}
+          {timeRangeActive && (
+            <g pointerEvents="none">
+              {timeFrom > timeMin && (
+                <rect x={timeToX(timeMin)} y={TOP_PAD}
+                  width={(timeFrom - timeMin) * PX_PER_UNIT}
+                  height={numRows * ROW_HEIGHT}
+                  fill="rgba(15, 23, 42, 0.05)" />
+              )}
+              {timeTo < horizon && (
+                <rect x={timeToX(timeTo)} y={TOP_PAD}
+                  width={(horizon - timeTo) * PX_PER_UNIT}
+                  height={numRows * ROW_HEIGHT}
+                  fill="rgba(15, 23, 42, 0.05)" />
+              )}
+              {timeFrom > timeMin && (
+                <line x1={timeToX(timeFrom)} y1={TOP_PAD - 4}
+                  x2={timeToX(timeFrom)} y2={TOP_PAD + numRows * ROW_HEIGHT}
+                  stroke="#0969da" strokeWidth="1.5" strokeDasharray="4 3" />
+              )}
+              {timeTo < horizon && (
+                <line x1={timeToX(timeTo)} y1={TOP_PAD - 4}
+                  x2={timeToX(timeTo)} y2={TOP_PAD + numRows * ROW_HEIGHT}
+                  stroke="#0969da" strokeWidth="1.5" strokeDasharray="4 3" />
+              )}
+            </g>
+          )}
+
           {/* Machine unavailability bands */}
           {showUnavail && allMachines.map(m => {
             if (!fMachines.has(m)) return null;
             const y = TOP_PAD + m * ROW_HEIGHT + 4;
-            return gaps(data.machine_windows[m], horizon).map(([a, b], i) => (
+            return gaps(data.machine_windows[m], timeMin, horizon).map(([a, b], i) => (
               <rect key={`umach-${m}-${i}`}
                 x={timeToX(a)} y={y}
                 width={(b - a) * PX_PER_UNIT} height={ROW_HEIGHT - 8}
@@ -376,7 +590,7 @@ function App() {
           {showUnavail && showOperators && allOperators.map(o => {
             if (!fOperators.has(o)) return null;
             const y = TOP_PAD + (data.n_machines + o) * ROW_HEIGHT + 4;
-            return gaps(data.operator_windows[o], horizon).map(([a, b], i) => (
+            return gaps(data.operator_windows[o], timeMin, horizon).map(([a, b], i) => (
               <rect key={`uop-${o}-${i}`}
                 x={timeToX(a)} y={y}
                 width={(b - a) * PX_PER_UNIT} height={ROW_HEIGHT - 8}
@@ -387,7 +601,9 @@ function App() {
           {/* Operations */}
           {visibleOps.map(op => {
             const dim = dimmed(op);
-            const opacity = dim ? 0.15 : 1.0;
+            const baseAlpha = dim ? 0.15 : 1.0;
+            const st = stateStyle(op.state || "pending");
+            const opacity = baseAlpha * st.alpha;
             const color = jobColor(op.job_id);
             const yMachine = TOP_PAD + op.machine * ROW_HEIGHT + 4;
             const yOperator = TOP_PAD + (data.n_machines + op.operator) * ROW_HEIGHT + 4;
@@ -400,38 +616,66 @@ function App() {
               onMouseMove: onHover(op),
               onMouseLeave: onLeave,
             };
-            const showLabel = procW > 32 && !dim;
+            const showProcLabel = procW > 32 && !dim;
+            const showSetupLabel = showSetup && setupW > 28 && !dim;
+            const stateBadge = op.state === "running" ? "▶"
+                              : op.state === "completed" ? "✓"
+                              : "";
             return (
               <g key={`${op.job_id}-${op.op_idx}`}>
+                {/* Setup block: tinted base + diagonal hatch + "setup" label */}
                 {showSetup && op.setup_duration > 0 && (
-                  <rect className="op-rect"
-                    x={setupX} y={yMachine}
-                    width={setupW} height={ROW_HEIGHT - 8}
-                    fill={color} opacity={opacity * 0.3}
-                    stroke="#000" strokeWidth="0.5"
-                    {...handlers} />
+                  <g>
+                    <rect className="op-rect"
+                      x={setupX} y={yMachine}
+                      width={setupW} height={ROW_HEIGHT - 8}
+                      fill={color} opacity={opacity * 0.4}
+                      stroke={st.stroke} strokeWidth={st.strokeWidth}
+                      strokeDasharray={st.dasharray}
+                      {...handlers} />
+                    <rect
+                      x={setupX} y={yMachine}
+                      width={setupW} height={ROW_HEIGHT - 8}
+                      fill="url(#setupHatch)"
+                      opacity={opacity}
+                      pointerEvents="none" />
+                    {showSetupLabel && (
+                      <text x={setupX + setupW / 2}
+                        y={yMachine + (ROW_HEIGHT - 8) / 2 + 4}
+                        textAnchor="middle"
+                        fill="#1f2328" fontSize="9" fontWeight="700"
+                        opacity={opacity}
+                        pointerEvents="none">
+                        setup
+                      </text>
+                    )}
+                  </g>
                 )}
+                {/* Processing block on the machine row */}
                 <rect className="op-rect"
                   x={procX} y={yMachine}
                   width={procW} height={ROW_HEIGHT - 8}
                   fill={color} opacity={opacity}
-                  stroke="#000" strokeWidth="0.5"
+                  stroke={st.stroke} strokeWidth={st.strokeWidth}
+                  strokeDasharray={st.dasharray}
                   {...handlers} />
-                {showLabel && (
+                {showProcLabel && (
                   <text x={procX + procW / 2}
                     y={yMachine + (ROW_HEIGHT - 8) / 2 + 4}
                     textAnchor="middle"
                     fill="#fff" fontSize="11" fontWeight="500"
                     pointerEvents="none">
-                    J{op.job_id}-O{op.op_idx}
+                    {stateBadge ? `${stateBadge} ` : ""}J{op.job_id}-O{op.op_idx}
                   </text>
                 )}
+                {/* Mirror onto the operator row */}
                 {showOperators && (
                   <rect className="op-rect"
                     x={procX} y={yOperator}
                     width={procW} height={ROW_HEIGHT - 8}
                     fill={color} opacity={opacity * 0.85}
-                    stroke="#000" strokeWidth="0.5"
+                    stroke={st.stroke} strokeWidth={st.strokeWidth}
+                    strokeDasharray={st.dasharray}
                     {...handlers} />
                 )}
               </g>
@@ -440,7 +684,11 @@ function App() {
         </svg>
       </div>
 
-      {hovered && <Tooltip op={hovered.op} x={hovered.x} y={hovered.y} />}
+      <Legend />
+
+      {hovered && (
+        <Tooltip op={hovered.op} x={hovered.x} y={hovered.y} />
+      )}
     </div>
   );
 }
@@ -448,7 +696,7 @@ function App() {
 if (!window.SCHEDULE_DATA) {
   document.getElementById("root").innerHTML =
     '<div class="empty">No schedule data found.<br/>' +
-    'Run <code>uv run fjsp</code> from the project root to generate ' +
+    'Run <code>uv run fjsp solve</code> from the project root to generate ' +
     '<code>web/data.js</code>, then reload this page.</div>';
 } else {
   ReactDOM.createRoot(document.getElementById("root")).render(<App />);
