@@ -11,13 +11,13 @@ and per-stage real-time order status (completed / running / pending).
 The code is organized into three layers — **input** (data), **solver**
 (GRASP), and **output** (visualization & export):
 
-| Layer       | Modules                                                                                                                   | Role                                                            |
-| ----------- | ------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
-| Input       | [src/fjsp/input/domain.py](src/fjsp/input/domain.py), [io.py](src/fjsp/input/io.py), [generator.py](src/fjsp/input/generator.py) | Domain types · JSON load/save · `toy_instance()` and `random_instance()` |
-| Solver      | [src/fjsp/solver.py](src/fjsp/solver.py)                                                                                  | GRASP construction + local search, with running-op pinning      |
-| Output      | [src/fjsp/output/gantt.py](src/fjsp/output/gantt.py), [web_export.py](src/fjsp/output/web_export.py), [web/index.html](web/index.html) | Matplotlib Gantt · React viewer with search, filters, tooltips |
-| CLI         | [src/fjsp/cli.py](src/fjsp/cli.py)                                                                                        | `fjsp solve` · `fjsp generate` · `fjsp inspect` (click-based)   |
-| Instances   | [instances/](instances/)                                                                                                  | One JSON file per instance                                      |
+| Layer     | Modules                                                                                                                                | Role                                                                     |
+| --------- | -------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| Input     | [src/fjsp/input/domain.py](src/fjsp/input/domain.py), [io.py](src/fjsp/input/io.py), [generator.py](src/fjsp/input/generator.py)       | Domain types · JSON load/save · `toy_instance()` and `random_instance()` |
+| Solver    | [src/fjsp/solver.py](src/fjsp/solver.py)                                                                                               | GRASP construction + local search, with running-op pinning               |
+| Output    | [src/fjsp/output/gantt.py](src/fjsp/output/gantt.py), [web_export.py](src/fjsp/output/web_export.py), [web/index.html](web/index.html) | Matplotlib Gantt · React viewer with search, filters, tooltips           |
+| CLI       | [src/fjsp/cli.py](src/fjsp/cli.py)                                                                                                     | `fjsp solve` · `fjsp generate` · `fjsp inspect` (click-based)            |
+| Instances | [instances/](instances/)                                                                                                               | One JSON file per instance                                               |
 
 The implementation follows the canonical formulation from
 **Resende & Ribeiro (2016)**, *Optimization by GRASP* (in [docs/](docs/)).
@@ -107,16 +107,16 @@ The relational shape — mirroring how the data would live in a real
 shop's database — is in
 [src/fjsp/input/domain.py](src/fjsp/input/domain.py):
 
-| Type           | Real-world counterpart                                                                 |
-| -------------- | -------------------------------------------------------------------------------------- |
+| Type           | Real-world counterpart                                                                |
+| -------------- | ------------------------------------------------------------------------------------- |
 | `Product`      | A manufactured product type with an ordered list of `Stage`s                          |
 | `Stage`        | One production step + the machines this product uses for it + processing time on each |
 | `Machine`      | A machine, its availability windows, its setup matrix, and its current/last product   |
-| `Operator`     | A worker: which machines they can run + their shift availability                       |
-| `Order`        | A customer order = a job; product + deadline + per-stage `OrderStatus`                 |
-| `OrderStatus`  | Two lists of `StageHistory`: `completed` and `running`; `pending` is derived           |
-| `StageHistory` | An already-known stage instance: machine, operator, start, end, setup duration         |
-| `Instance`     | Everything above + horizon + `stage_machines` + `machine_stage_mode`                   |
+| `Operator`     | A worker: which machines they can run + their shift availability                      |
+| `Order`        | A customer order = a job; product + deadline + per-stage `OrderStatus`                |
+| `OrderStatus`  | Two lists of `StageHistory`: `completed` and `running`; `pending` is derived          |
+| `StageHistory` | An already-known stage instance: machine, operator, start, end, setup duration        |
+| `Instance`     | Everything above + horizon + `stage_machines` + `machine_stage_mode`                  |
 
 Instances are loaded from / saved to JSON via
 [`load_instance`](src/fjsp/input/io.py) /
@@ -144,16 +144,16 @@ Two builders in [src/fjsp/input/generator.py](src/fjsp/input/generator.py):
 
   Knobs on the config:
 
-  | Field                                                     | What it controls                                              |
-  | --------------------------------------------------------- | ------------------------------------------------------------- |
-  | `n_products`, `n_machines`, `n_operators`, `n_orders`     | counts                                                        |
-  | `horizon`                                                 | planning horizon (also caps window upper bounds)              |
-  | `n_stages`, `machine_stage_mode`                          | shop-level stage layout                                       |
-  | `stage_machines`                                          | explicit per-stage machine list (auto-partitioned if omitted) |
-  | `operator_machine_coverage`                               | `P(operator allowed on each machine)`                         |
-  | `setup_machines_fraction`                                 | fraction of machines that have a non-empty setup matrix       |
-  | `setup_time_min` / `_max`, `proc_time_min` / `_max`       | duration bounds                                               |
-  | `seed`                                                    | random seed                                                   |
+  | Field                                                 | What it controls                                              |
+  | ----------------------------------------------------- | ------------------------------------------------------------- |
+  | `n_products`, `n_machines`, `n_operators`, `n_orders` | counts                                                        |
+  | `horizon`                                             | planning horizon (also caps window upper bounds)              |
+  | `n_stages`, `machine_stage_mode`                      | shop-level stage layout                                       |
+  | `stage_machines`                                      | explicit per-stage machine list (auto-partitioned if omitted) |
+  | `operator_machine_coverage`                           | `P(operator allowed on each machine)`                         |
+  | `setup_machines_fraction`                             | fraction of machines that have a non-empty setup matrix       |
+  | `setup_time_min` / `_max`, `proc_time_min` / `_max`   | duration bounds                                               |
+  | `seed`                                                | random seed                                                   |
 
   When `stage_machines` is left blank: `per_stage` mode round-robins
   `M0..M{n-1}` across `n_stages`; `shared` mode joins each
@@ -191,11 +191,11 @@ Availability:
 Both operators can run all four machines. Setup matrix `s(prev, curr)`
 (applied uniformly on every machine):
 
-|              | curr = P0 | curr = P1 |
-| ------------ | --------- | --------- |
-| prev = ⊥     | 0         | 0         |
-| prev = P0    | 0         | 1         |
-| prev = P1    | 2         | 0         |
+|           | curr = P0 | curr = P1 |
+| --------- | --------- | --------- |
+| prev = ⊥  | 0         | 0         |
+| prev = P0 | 0         | 1         |
+| prev = P1 | 2         | 0         |
 
 Switching from P0 to P1 costs 1 unit of setup; from P1 to P0, 2; staying
 on the same product is free; the first op on a machine is free.
@@ -228,11 +228,11 @@ minimization problem (Resende & Ribeiro 2016, p. 60):
 RCL = { c ∈ F : g(c) ≤ g_min + α · (g_max − g_min) }
 ```
 
-| α      | Effect                                              |
-| ------ | --------------------------------------------------- |
-| 0      | Pure greedy (only the best candidates in the RCL)   |
-| 1      | Uniform random (every feasible candidate in the RCL)|
-| 0.1–0.3| Typical "semi-greedy" working range                  |
+| α       | Effect                                               |
+| ------- | ---------------------------------------------------- |
+| 0       | Pure greedy (only the best candidates in the RCL)    |
+| 1       | Uniform random (every feasible candidate in the RCL) |
+| 0.1–0.3 | Typical "semi-greedy" working range                  |
 
 The book uses the same formula and explicitly states "α = 0 corresponds
 to a pure greedy algorithm... α = 1 leads to a completely random
@@ -253,13 +253,13 @@ algorithm" (Fig. 3.18 caption).
  8:     return bestSol
 ```
 
-| Line | What it does                                                                    |
-| ---- | ------------------------------------------------------------------------------- |
-| 2    | Track the incumbent across restarts — that's the multistart idea.               |
-| 3    | Each iteration is independent. (GRASP is embarrassingly parallel.)              |
-| 4    | Build a *fresh* solution from scratch — different randomness, different basin.  |
-| 5    | Polish to a local optimum.                                                      |
-| 6–7  | Standard "remember the best".                                                   |
+| Line | What it does                                                                   |
+| ---- | ------------------------------------------------------------------------------ |
+| 2    | Track the incumbent across restarts — that's the multistart idea.              |
+| 3    | Each iteration is independent. (GRASP is embarrassingly parallel.)             |
+| 4    | Build a *fresh* solution from scratch — different randomness, different basin. |
+| 5    | Polish to a local optimum.                                                     |
+| 6–7  | Standard "remember the best".                                                  |
 
 This corresponds to `grasp(...)` at
 [src/fjsp/solver.py:216](src/fjsp/solver.py:216).
@@ -271,12 +271,12 @@ This corresponds to `grasp(...)` at
 When you specialize GRASP to a problem, you answer **four** design
 questions:
 
-| Q | What does GRASP need? | Choice for our FJSP                                                                |
-| - | --------------------- | ---------------------------------------------------------------------------------- |
-| 1 | The candidate set     | Triples `(op, machine, operator)` where op is *ready* (its predecessor is done)    |
-| 2 | A greedy function `g` | `earliest completion time` of the candidate, accounting for setup + windows       |
-| 3 | The RCL rule          | `g(c) ≤ g_min + α(g_max − g_min)` (Resende & Ribeiro 2016, ch. 3)                  |
-| 4 | How to advance state  | Fix `(op*, m*, o*, start*, end*)`, update machine/operator/job clocks, re-iterate |
+| Q   | What does GRASP need? | Choice for our FJSP                                                               |
+| --- | --------------------- | --------------------------------------------------------------------------------- |
+| 1   | The candidate set     | Triples `(op, machine, operator)` where op is *ready* (its predecessor is done)   |
+| 2   | A greedy function `g` | `earliest completion time` of the candidate, accounting for setup + windows       |
+| 3   | The RCL rule          | `g(c) ≤ g_min + α(g_max − g_min)` (Resende & Ribeiro 2016, ch. 3)                 |
+| 4   | How to advance state  | Fix `(op*, m*, o*, start*, end*)`, update machine/operator/job clocks, re-iterate |
 
 The "ready set" is what makes this *adaptive* in the GRASP sense: each
 time you commit to a candidate, the set of feasible next candidates
@@ -339,16 +339,16 @@ that fits.
 29:     return S
 ```
 
-| Line  | Meaning                                                                                                                |
-| ----- | ---------------------------------------------------------------------------------------------------------------------- |
+| Line  | Meaning                                                                                                                                           |
+| ----- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 2–5   | Four state vectors: when each *machine* is free, what *product* it last ran, when each *operator* is free, when each *job's* prefix has finished. |
-| 9     | "Ready" operations are the next un-scheduled op of each job (precedence within the job is enforced by `job_ready`).    |
-| 11    | Setup depends on the last product seen on **this** machine — that's the SDST extension.                                |
-| 14    | All three resources block start: machine, operator, and the job's previous op.                                         |
-| 15    | The availability extension lives entirely in this call — see §4.1.                                                     |
-| 19–22 | RCL formula straight from Resende & Ribeiro (2016, p. 60).                                                              |
-| 23    | The only random step in the construction.                                                                              |
-| 25–28 | Advance state. The "adaptive" property: future RCLs depend on what we just chose.                                      |
+| 9     | "Ready" operations are the next un-scheduled op of each job (precedence within the job is enforced by `job_ready`).                               |
+| 11    | Setup depends on the last product seen on **this** machine — that's the SDST extension.                                                           |
+| 14    | All three resources block start: machine, operator, and the job's previous op.                                                                    |
+| 15    | The availability extension lives entirely in this call — see §4.1.                                                                                |
+| 19–22 | RCL formula straight from Resende & Ribeiro (2016, p. 60).                                                                                        |
+| 23    | The only random step in the construction.                                                                                                         |
+| 25–28 | Advance state. The "adaptive" property: future RCLs depend on what we just chose.                                                                 |
 
 This corresponds to `construct(...)` at
 [src/fjsp/solver.py:168](src/fjsp/solver.py:168). Note that lines 2–5
@@ -369,16 +369,16 @@ Initially `machine_end = [0, 0]`, `operator_end = [0, 0]`,
 Enumerate every (op, m, o) candidate. Setup is 0 for everyone (no
 machine has run anything yet). I'll list end times:
 
-| Candidate                  | block (setup + proc) | window check                | start | end |
-| -------------------------- | -------------------- | --------------------------- | ----- | --- |
-| O(0,0), M0, Op0            | 0 + 3 = 3            | M0 ok, Op0 [0,4] fits       | 0     | 3   |
-| O(0,0), M0, Op1            | 0 + 3 = 3            | M0 ok, Op1 [0,5] fits       | 0     | 3   |
-| O(0,0), M1, Op0            | 0 + 2 = 2            | M1 [0,3] fits, Op0 ok       | 0     | **2** |
-| O(0,0), M1, Op1            | 0 + 2 = 2            | both ok                     | 0     | **2** |
-| O(1,0), M0, Op0            | 0 + 4 = 4            | M0 ok, Op0 [0,4] *just* fits | 0     | 4   |
-| O(1,0), M0, Op1            | 0 + 4 = 4            | both ok                     | 0     | 4   |
-| O(1,0), M1, Op0            | 0 + 3 = 3            | M1 [0,3] fits                | 0     | 3   |
-| O(1,0), M1, Op1            | 0 + 3 = 3            | both ok                     | 0     | 3   |
+| Candidate       | block (setup + proc) | window check                 | start | end   |
+| --------------- | -------------------- | ---------------------------- | ----- | ----- |
+| O(0,0), M0, Op0 | 0 + 3 = 3            | M0 ok, Op0 [0,4] fits        | 0     | 3     |
+| O(0,0), M0, Op1 | 0 + 3 = 3            | M0 ok, Op1 [0,5] fits        | 0     | 3     |
+| O(0,0), M1, Op0 | 0 + 2 = 2            | M1 [0,3] fits, Op0 ok        | 0     | **2** |
+| O(0,0), M1, Op1 | 0 + 2 = 2            | both ok                      | 0     | **2** |
+| O(1,0), M0, Op0 | 0 + 4 = 4            | M0 ok, Op0 [0,4] *just* fits | 0     | 4     |
+| O(1,0), M0, Op1 | 0 + 4 = 4            | both ok                      | 0     | 4     |
+| O(1,0), M1, Op0 | 0 + 3 = 3            | M1 [0,3] fits                | 0     | 3     |
+| O(1,0), M1, Op1 | 0 + 3 = 3            | both ok                      | 0     | 3     |
 
 `g_min = 2`, `g_max = 4`, threshold = `2 + 0.3 × (4 − 2) = 2.6`.
 RCL = `{O(0,0)/M1/Op0, O(0,0)/M1/Op1}`. Pick one uniformly, say
@@ -454,11 +454,11 @@ setup_duration)`. For completed entries `end` is the actual finish time
 
 How [`_initial_state`](src/fjsp/solver.py) seeds the solver clocks:
 
-| For each…           | Effect on the solver                                                                                                                               |
-| ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| For each…           | Effect on the solver                                                                                                                                                                             |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | **completed** stage | Doesn't pin anything. *Updates* `machine_last_product[m]` if it's the most recently ended completed/running stage on that machine — so the first newly-scheduled op on `m` pays the right setup. |
-| **running** stage   | Pins `machine_end[m] = h.end`, `operator_end[o] = h.end`, propagates `machine_last_product[m] = order.product_id`, advances `job_ready[j] = h.end`. |
-| `next_op_idx[j]`    | Smallest stage index *not* in completed ∪ running. (For FJSP, completed and running form a prefix.)                                                |
+| **running** stage   | Pins `machine_end[m] = h.end`, `operator_end[o] = h.end`, propagates `machine_last_product[m] = order.product_id`, advances `job_ready[j] = h.end`.                                              |
+| `next_op_idx[j]`    | Smallest stage index *not* in completed ∪ running. (For FJSP, completed and running form a prefix.)                                                                                              |
 
 `Machine.current_product_id` is the analogous field at the *machine*
 level — what was on the machine before any order's history applies (e.g.,
@@ -545,16 +545,16 @@ export_web_data(inst, sched, "web/data.js")
 
 Where things live in [solver.py](src/fjsp/solver.py):
 
-| GRASP concept                                | Code                                          |
-| -------------------------------------------- | --------------------------------------------- |
-| Top-level multistart loop                    | `grasp` (line 343)                            |
-| Semi-greedy construction (RCL)               | `construct` (line 168)                        |
-| `RCL = { c : g(c) ≤ g_min + α(g_max-g_min)}` | line 217                                      |
-| Earliest feasible start under windows        | `_earliest_feasible_start` (line 73)          |
-| Operator–machine eligibility lookup          | `_eligible_operators` (line 95)               |
-| Initial state from `OrderStatus`             | `_initial_state` (line 111)                   |
-| Schedule replay (used by local search)       | `simulate` (line 233)                         |
-| Local search on N_M and N_O                  | `local_search` (line 278)                     |
+| GRASP concept                                | Code                                 |
+| -------------------------------------------- | ------------------------------------ |
+| Top-level multistart loop                    | `grasp` (line 343)                   |
+| Semi-greedy construction (RCL)               | `construct` (line 168)               |
+| `RCL = { c : g(c) ≤ g_min + α(g_max-g_min)}` | line 217                             |
+| Earliest feasible start under windows        | `_earliest_feasible_start` (line 73) |
+| Operator–machine eligibility lookup          | `_eligible_operators` (line 95)      |
+| Initial state from `OrderStatus`             | `_initial_state` (line 111)          |
+| Schedule replay (used by local search)       | `simulate` (line 233)                |
+| Local search on N_M and N_O                  | `local_search` (line 278)            |
 
 ---
 
@@ -565,21 +565,28 @@ The project is managed with **uv** and the CLI is a click app.
 ```bash
 uv sync                                              # install dependencies
 uv run fjsp solve -i instances/toy/instance.json     # solve a saved instance
-uv run fjsp generate \
-    -c instances/small-1/problem_config.yaml \
-    --seed 42 --out-dir instances/my-instance        # writes both instance.json
-                                                     # and problem_config.yaml
+
+# generate into the convention in one shot:
+uv run fjsp generate -c instances/small-1/problem_config.yaml \
+    --seed 42 --out-dir instances/my-instance
+# → writes instances/my-instance/instance.json
+#         + instances/my-instance/problem_config.yaml (copy of source config)
+
+# without -c, the effective config is dumped as YAML so the folder
+# still records exactly which knobs produced the instance:
+uv run fjsp generate --machines 6 --n-stages 3 --mode shared \
+    --seed 7 --out-dir instances/M6S3-shared
 uv run fjsp inspect instances/small-1/instance.json  # print a summary
 uv run fjsp                                          # shortcut for `solve -i instances/toy/instance.json`
 ```
 
 Three subcommands today (`fjsp --help` lists them):
 
-| Subcommand    | What it does                                                         |
-| ------------- | -------------------------------------------------------------------- |
-| `solve`       | Read an instance JSON, run GRASP, save Gantt + React data            |
-| `generate`    | Build a parametric synthetic instance and write it as JSON           |
-| `inspect`     | Print a human-readable summary of an instance                        |
+| Subcommand | What it does                                               |
+| ---------- | ---------------------------------------------------------- |
+| `solve`    | Read an instance JSON, run GRASP, save Gantt + React data  |
+| `generate` | Build a parametric synthetic instance and write it as JSON |
+| `inspect`  | Print a human-readable summary of an instance              |
 
 Sample output on the toy with `seed=0, α=0.3, max_iter=200`:
 
