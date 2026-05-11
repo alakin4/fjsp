@@ -36,9 +36,15 @@ def export_web_data(
         "time_min": time_min,
         "horizon": time_max,
         "machines": [
-            {"id": m.machine_id, "name": m.name}
+            {"id": m.machine_id, "name": m.name,
+             "stage": instance.stage_of_machine(m.machine_id)}
             for m in instance.machines
         ],
+        "stage_machines": (
+            [list(s) for s in instance.stage_machines]
+            if instance.stage_machines is not None else None
+        ),
+        "machine_stage_mode": instance.machine_stage_mode,
         "operators": [
             {"id": o.operator_id, "name": o.name}
             for o in instance.operators

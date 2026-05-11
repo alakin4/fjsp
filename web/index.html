@@ -509,6 +509,9 @@ function App() {
           {/* Machine rows */}
           {allMachines.map(m => {
             const y = TOP_PAD + m * ROW_HEIGHT;
+            const stage = (data.machines && data.machines[m] != null)
+              ? data.machines[m].stage : null;
+            const label = stage != null ? `S${stage}  M${m}` : `M${m}`;
             return (
               <g key={`m-${m}`}>
                 <rect x={LEFT_PAD} y={y}
@@ -518,10 +521,33 @@ function App() {
                   x2={LEFT_PAD + timeSpan * PX_PER_UNIT} y2={y + ROW_HEIGHT}
                   className="row-divider" />
                 <text x={LEFT_PAD - 12} y={y + ROW_HEIGHT/2 + 4}
-                  textAnchor="end" className="row-label">M{m}</text>
+                  textAnchor="end" className="row-label">{label}</text>
               </g>
             );
           })}
+
+          {/* Per-stage dividers between machine rows (only with a stage layout) */}
+          {data.stage_machines && (() => {
+            const seen = new Set();
+            const dividers = [];
+            for (let m = 0; m < data.n_machines; m++) {
+              const st = data.machines && data.machines[m]
+                       ? data.machines[m].stage : null;
+              if (st == null) continue;
+              if (seen.has(st)) continue;
+              seen.add(st);
+              if (m === 0) continue;
+              const y = TOP_PAD + m * ROW_HEIGHT;
+              dividers.push(
+                <line key={`stage-div-${m}`}
+                  x1={LEFT_PAD - 80} y1={y}
+                  x2={LEFT_PAD + timeSpan * PX_PER_UNIT} y2={y}
+                  stroke="#0969da" strokeWidth="1.2" strokeDasharray="6 4"
+                  opacity="0.55" />
+              );
+            }
+            return dividers;
+          })()}
 
           {/* Operator rows */}
           {showOperators && allOperators.map(o => {
