@@ -2,9 +2,11 @@
 
 A small, readable Python implementation of **GRASP** (Greedy Randomized
 Adaptive Search Procedure) for an **extended Flexible Job-Shop Problem**
-(FJSP). The extensions — machine availability, operator availability, and
-product-dependent setup times — are the kind of constraints that make
-real shop-floor problems harder than the textbook FJSP.
+(FJSP). The instance model covers the constraints that show up on a
+real shop floor: shop-level production stages with optional
+stage–machine partitioning, machine availability windows, operator
+shifts and operator–machine eligibility, product-dependent setup times,
+and per-stage real-time order status (completed / running / pending).
 
 The code is organized into three layers — **input** (data), **solver**
 (GRASP), and **output** (visualization & export):
@@ -44,78 +46,148 @@ You have:
 - The standard objective is to minimize the **makespan** `C_max`, i.e.,
   the time the last operation finishes.
 
-### 1.2 Three real-world extensions
+### 1.2 What an instance carries
 
-The classical FJSP assumes machines and operators are always available
-and that switching jobs is free. None of those is true on a real shop
-floor, so we add:
+The instances this codebase represents and generates go beyond the
+textbook FJSP. Concretely, every instance carries:
 
-1. **Machine availability windows.** Each machine `m` has a list of
-   intervals `[a, b]` during which it is usable (e.g. excluded:
-   maintenance, planned downtime). An operation can be processed on
-   `m` only if its entire processing block fits inside *one* such
-   window.
+1. **Products with shop-level production stages.** Each product has a
+   *fixed ordered list* of stages; stage indices are global concepts
+   (shared across all products), not per-product. A product's `Stage`
+   declares the machines it can run on at that stage and the processing
+   time on each.
 
-2. **Operator availability windows.** Each operation also requires an
-   operator drawn from an eligible subset. Each operator has its own
-   availability windows (e.g. shift, breaks). The op's block must fit
-   inside one machine window **and** one operator window
-   simultaneously.
+2. **Shop-level stage layout.** The shop tells you which machines are
+   eligible for each stage via `Instance.stage_machines`. Two modes
+   (`Instance.machine_stage_mode`):
 
-3. **Product-dependent setup times** (also called *sequence-dependent
-   setup times*, SDST). When a machine `m` switches from a job
-   producing product `p1` to one producing `p2`, it incurs a setup
-   `s(m, p1, p2)` *before* processing starts. The first job on a
-   machine has no predecessor; we treat that as `s(m, ⊥, p) = 0`.
+   - `per_stage` — each machine belongs to *exactly one* stage. Models
+     a flow-shop with stage-specialized machines (paint booth ↔ painting,
+     CNC mill ↔ milling, etc.); the per-stage machine lists are disjoint.
+   - `shared` — a machine may serve *multiple* stages. Standard FJSP.
 
-These three constraints are exactly the family of conditions that
-Cartes & Medina (2016) handles for surgery scheduling (rooms = machines,
-surgeons/nurses = operators, surgical-team compatibility ≈ setups).
+   A validator enforces that every product's `Stage.eligible_machines[k]`
+   is a subset of `stage_machines[k]`.
+
+3. **Machine availability windows.** Each machine has a list of closed
+   intervals during which it is usable (i.e. *not* under maintenance).
+   An operation can be processed on a machine only if its entire
+   `setup + processing` block fits inside one window.
+
+4. **Machine setup matrices** (sequence-dependent setup times, SDST).
+   Each machine has an optional product-dependent setup matrix
+   `s(prev, curr)`; an empty matrix means the machine never requires
+   setup. A `Machine.current_product_id` field captures the product
+   most recently processed so the *first* newly-scheduled op pays the
+   right setup.
+
+5. **Operators with shifts and machine eligibility.** Every operation
+   needs both a machine and an operator present for the whole block.
+   Operators carry (a) the subset of machines they can run, and (b)
+   their own shift availability windows (work / break alternation).
+
+6. **Orders with deadlines and per-stage real-time status.** Each stage
+   of each order is in exactly one of three buckets:
+
+   - `completed` — already finished; the order's `OrderStatus.completed`
+     entry records the past machine, operator, start, end and setup.
+   - `running` — currently in progress; the `OrderStatus.running` entry
+     pins a (machine, operator) pair busy until its expected end.
+   - `pending` — derived (everything else); these are the only stages
+     the solver actually schedules.
+
+The constraint shape echoes the surgery-scheduling problem in
+Cartes & Medina (2016) — rooms ↔ machines, surgeons / nurses ↔
+operators, surgical-team compatibility ↔ setups — making GRASP a
+natural fit.
 
 ### 1.3 Domain model
 
-The relational shape of an instance — mirroring how the data would live
-in a real shop's database — is in
+The relational shape — mirroring how the data would live in a real
+shop's database — is in
 [src/fjsp/input/domain.py](src/fjsp/input/domain.py):
 
-| Type           | Real-world counterpart                                                       |
-| -------------- | ---------------------------------------------------------------------------- |
-| `Product`      | one of the manufactured product types, with an ordered list of `Stage`s     |
-| `Stage`        | one production step + the eligible machines and per-machine processing time |
-| `Machine`      | a machine, its availability windows, its setup matrix, and the product it currently/last processed |
-| `Operator`     | a worker: which machines they can run, and their shift availability         |
-| `Order`        | a customer order = a job; product + deadline + a real-time `OrderStatus`    |
-| `OrderStatus`  | `pending` / `running` / `completed` plus running-op pin info                |
-| `Instance`     | the full bundle: products + machines + operators + orders + horizon         |
+| Type           | Real-world counterpart                                                                 |
+| -------------- | -------------------------------------------------------------------------------------- |
+| `Product`      | A manufactured product type with an ordered list of `Stage`s                          |
+| `Stage`        | One production step + the machines this product uses for it + processing time on each |
+| `Machine`      | A machine, its availability windows, its setup matrix, and its current/last product   |
+| `Operator`     | A worker: which machines they can run + their shift availability                       |
+| `Order`        | A customer order = a job; product + deadline + per-stage `OrderStatus`                 |
+| `OrderStatus`  | Two lists of `StageHistory`: `completed` and `running`; `pending` is derived           |
+| `StageHistory` | An already-known stage instance: machine, operator, start, end, setup duration         |
+| `Instance`     | Everything above + horizon + `stage_machines` + `machine_stage_mode`                   |
 
 Instances are loaded from / saved to JSON via
-[`load_instance`](src/fjsp/input/io.py) / [`save_instance`](src/fjsp/input/io.py).
-The JSON schema is documented in [instances/README.md](instances/README.md).
+[`load_instance`](src/fjsp/input/io.py) /
+[`save_instance`](src/fjsp/input/io.py). `load_instance` runs
+[`validate_instance`](src/fjsp/input/io.py) automatically — refusing an
+instance whose product stages escape the shop's per-stage whitelist or
+that violates `per_stage` disjointness. The JSON schema is documented
+in [instances/README.md](instances/README.md).
 
-### 1.4 Toy instance
+### 1.4 Generating instances
 
-The instance built by `toy_instance()` in
-[src/fjsp/input/generator.py](src/fjsp/input/generator.py) and saved as
-[instances/toy.json](instances/toy.json) has 2 jobs, 2 machines, 2 operators, 2 products:
+Two builders in [src/fjsp/input/generator.py](src/fjsp/input/generator.py):
 
-| Operation | Product | M0 (proc) | M1 (proc) | Eligible operators |
-| --------- | ------- | --------- | --------- | ------------------ |
-| O(0,0)    | P0      | 3         | 2         | Op0, Op1           |
-| O(0,1)    | P0      | 2         | 4         | Op0, Op1           |
-| O(1,0)    | P1      | 4         | 3         | Op0, Op1           |
-| O(1,1)    | P1      | 3         | 5         | Op0, Op1           |
+- **`toy_instance()`** — a fixed 2-product / 4-machine / 2-stage /
+  2-operator example used in §1.5 and throughout this README.
+- **`random_instance(config, **overrides)`** — parametric synthetic
+  generation driven by a
+  [`ProblemConfig`](src/fjsp/input/config.py), normally loaded from a
+  YAML file:
+
+  ```bash
+  uv run fjsp generate -c problem_config.yaml -o instances/my.json
+  ```
+
+  Knobs on the config:
+
+  | Field                                                     | What it controls                                              |
+  | --------------------------------------------------------- | ------------------------------------------------------------- |
+  | `n_products`, `n_machines`, `n_operators`, `n_orders`     | counts                                                        |
+  | `horizon`                                                 | planning horizon (also caps window upper bounds)              |
+  | `n_stages`, `machine_stage_mode`                          | shop-level stage layout                                       |
+  | `stage_machines`                                          | explicit per-stage machine list (auto-partitioned if omitted) |
+  | `operator_machine_coverage`                               | `P(operator allowed on each machine)`                         |
+  | `setup_machines_fraction`                                 | fraction of machines that have a non-empty setup matrix       |
+  | `setup_time_min` / `_max`, `proc_time_min` / `_max`       | duration bounds                                               |
+  | `seed`                                                    | random seed                                                   |
+
+  When `stage_machines` is left blank: `per_stage` mode round-robins
+  `M0..M{n-1}` across `n_stages`; `shared` mode joins each
+  `(machine, stage)` pair independently with probability
+  `stage_share`. See [problem_config.yaml](problem_config.yaml) for the
+  example wired to the bundled `small-1.json`.
+
+Per-flag CLI options (`--mode`, `--machines`, `--seed`, …) override
+individual fields of the loaded config. `fjsp inspect <instance.json>`
+prints a human-readable summary including the stage layout.
+
+### 1.5 Toy instance
+
+The instance built by `toy_instance()` and saved as
+[instances/toy.json](instances/toy.json) has **2 products, 4 machines,
+2 operators**, in `per_stage` mode with **2 stages**:
+
+- **stage 0** → machines M0, M1
+- **stage 1** → machines M2, M3
+
+Per-product processing times:
+
+| Product | Stage 0 (M0 / M1) | Stage 1 (M2 / M3) |
+| ------- | ----------------- | ----------------- |
+| P0      | 3 / 2             | 2 / 4             |
+| P1      | 4 / 3             | 3 / 5             |
 
 Availability:
 
-- **M0**: always available.
-- **M1**: available `[0, 3)` ∪ `[5, ∞)` — maintenance closes M1 in
-  `[3, 5)`.
-- **Op0**: available `[0, 4)` ∪ `[7, ∞)` — lunch break in `[4, 7)`.
-- **Op1**: available `[0, 5)` ∪ `[7, ∞)` — lunch break in `[5, 7)`.
+- **M0** always available · **M1** maintenance in `[3, 5)`
+- **M2** always available · **M3** maintenance in `[4, 6)`
+- **Op0** lunch break in `[4, 7)` · **Op1** lunch break in `[5, 7)`
 
-Both operators can run both machines.
-
-Setup matrix `s(prev, curr)` (same on both machines):
+Both operators can run all four machines. Setup matrix `s(prev, curr)`
+(applied uniformly on every machine):
 
 |              | curr = P0 | curr = P1 |
 | ------------ | --------- | --------- |
@@ -123,9 +195,13 @@ Setup matrix `s(prev, curr)` (same on both machines):
 | prev = P0    | 0         | 1         |
 | prev = P1    | 2         | 0         |
 
-So switching from P0 to P1 costs 1 unit of setup; switching from P1 to
-P0 costs 2; staying on the same product costs 0; the first op on a
-machine is free.
+Switching from P0 to P1 costs 1 unit of setup; from P1 to P0, 2; staying
+on the same product is free; the first op on a machine is free.
+
+The companion [instances/toy-running.json](instances/toy-running.json)
+extends this with three orders that exercise the per-stage status
+machinery — one all-pending, one with a completed stage, one mid-flight
+on a stage-1 machine — see §5.5 for what the solver does with each.
 
 ---
 
@@ -501,24 +577,28 @@ Sample output on the toy with `seed=0, α=0.3, max_iter=200`:
 
 ```
 Loaded instance 'toy' from instances/toy.json
-  products=2  machines=2  operators=2  orders=2
+  products=2  machines=4  operators=2  orders=2
 Cmax = 11
   op             mach  op#   setup  proc_start  end
-  O(0,0)[P0]     M0    Op1   0      0           3
-  O(0,1)[P0]     M0    Op1   0      3           5
-  O(1,0)[P1]     M1    Op0   0      0           3
-  O(1,1)[P1]     M0    Op1   1      8           11
+  O(0,0)[P0]     M1    Op1   0      0           2
+  O(0,1)[P0]     M2    Op1   0      2           4
+  O(1,0)[P1]     M0    Op0   0      0           4
+  O(1,1)[P1]     M2    Op1   1      8           11
 ```
 
-Reading the schedule:
+Reading the schedule (stage 0 ops live on M0/M1, stage 1 ops on M2/M3 —
+the `per_stage` partition is respected):
 
-- `O(0,0)` runs on M0/Op1, [0, 3]. M0 last product = P0.
-- `O(0,1)` runs on M0/Op1, [3, 5]. P0→P0, setup 0.
-- `O(1,0)` runs on M1/Op0, [0, 3]. Fits inside M1's first window `[0, 3)`;
-  Op0 is on shift `[0, 4)`.
-- `O(1,1)` runs on M0/Op1: must wait for Op1 to come back from lunch at 7,
-  then P0→P1 setup [7, 8], processing [8, 11]. Op0 also unavailable until 7,
-  so M1 (back at 5) can't be used either.
+- `O(0,0)` (P0 stage 0) runs on **M1**/Op1, `[0, 2]`. Block fits inside
+  M1's first window `[0, 3)`. M1 last product = P0.
+- `O(0,1)` (P0 stage 1) runs on **M2**/Op1, `[2, 4]`. P0→P0 setup = 0;
+  M2 always available. M2 last product = P0.
+- `O(1,0)` (P1 stage 0) runs on **M0**/Op0, `[0, 4]`. Op0's first shift
+  `[0, 4)` just fits.
+- `O(1,1)` (P1 stage 1) runs on **M2**/Op1. M2 was free at 4, but Op1's
+  first shift `[0, 5)` only has one unit left and the block needs 4
+  (P0→P1 setup 1 + processing 3). The op waits for Op1's next shift at
+  `t = 7`: setup `[7, 8]`, processing `[8, 11]`.
 
 Cmax = 11.
 
