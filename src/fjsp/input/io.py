@@ -17,6 +17,7 @@ from .domain import (
     Product,
     Stage,
     StageHistory,
+    StageMode,
 )
 
 
@@ -87,6 +88,11 @@ def save_instance(instance: Instance, path: str | Path) -> Path:
     payload = {
         "name": instance.name,
         "horizon": instance.horizon,
+        "machine_stage_mode": instance.machine_stage_mode,
+        "stage_machines": (
+            [list(s) for s in instance.stage_machines]
+            if instance.stage_machines is not None else None
+        ),
         "products": [_product_to_json(p) for p in instance.products],
         "machines": [_machine_to_json(m) for m in instance.machines],
         "operators": [_operator_to_json(o) for o in instance.operators],
@@ -166,11 +172,70 @@ def _order_from_json(d: dict) -> Order:
 
 def load_instance(path: str | Path) -> Instance:
     payload = json.loads(Path(path).read_text())
-    return Instance(
+    sm = payload.get("stage_machines")
+    instance = Instance(
         name=payload["name"],
         horizon=payload["horizon"],
         products=[_product_from_json(p) for p in payload["products"]],
         machines=[_machine_from_json(m) for m in payload["machines"]],
         operators=[_operator_from_json(o) for o in payload["operators"]],
         orders=[_order_from_json(o) for o in payload["orders"]],
+        stage_machines=([list(s) for s in sm] if sm is not None else None),
+        machine_stage_mode=payload.get("machine_stage_mode", StageMode.SHARED),
     )
+    validate_instance(instance)
+    return instance
+
+
+# ------------------------------ validation -------------------------------
+
+def validate_instance(instance: Instance) -> None:
+    """Internal-consistency checks (raises ValueError on the first problem).
+
+    Catches:
+      - per_stage layout with overlapping machine assignments;
+      - stage_machines pointing at machine ids that don't exist;
+      - product stages whose eligible machines escape the shop's per-stage
+        whitelist.
+    """
+    sm = instance.stage_machines
+    if sm is None:
+        return
+
+    n_m = instance.n_machines
+    for s_idx, machines in enumerate(sm):
+        for m in machines:
+            if not (0 <= m < n_m):
+                raise ValueError(
+                    f"stage_machines[{s_idx}] references machine {m} "
+                    f"but instance has only {n_m} machines"
+                )
+
+    if instance.machine_stage_mode == StageMode.PER_STAGE:
+        seen: dict[int, int] = {}
+        for s_idx, machines in enumerate(sm):
+            for m in machines:
+                if m in seen:
+                    raise ValueError(
+                        f"per_stage mode: machine {m} appears in stage "
+                        f"{seen[m]} and stage {s_idx} (must be exclusive)"
+                    )
+                seen[m] = s_idx
+
+    for product in instance.products:
+        for stage in product.stages:
+            if not (0 <= stage.stage_idx < len(sm)):
+                raise ValueError(
+                    f"P{product.product_id} stage_idx={stage.stage_idx} "
+                    f"is out of range (shop has {len(sm)} stages)"
+                )
+            allowed = set(sm[stage.stage_idx])
+            actual = set(stage.eligible_machines.keys())
+            extras = actual - allowed
+            if extras:
+                raise ValueError(
+                    f"P{product.product_id} stage {stage.stage_idx} "
+                    f"lists machines {sorted(extras)} that are not "
+                    f"in shop's stage_machines[{stage.stage_idx}] = "
+                    f"{sorted(allowed)}"
+                )

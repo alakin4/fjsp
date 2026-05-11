@@ -165,6 +165,12 @@ class Order:
 
 # ------------------------------ instance ---------------------------------
 
+class StageMode:
+    """How machines are distributed across stages."""
+    PER_STAGE = "per_stage"   # each machine belongs to exactly one stage
+    SHARED = "shared"         # a machine may serve multiple stages
+
+
 @dataclass
 class Instance:
     name: str
@@ -173,6 +179,12 @@ class Instance:
     machines: list[Machine]
     operators: list[Operator]
     orders: list[Order]
+    # Shop-level stage layout. `stage_machines[stage_idx]` lists the
+    # machines eligible for that stage. Each product's
+    # `Stage.eligible_machines` for index `k` must be a subset of
+    # `stage_machines[k]`.  None ⇒ no shop-level partition.
+    stage_machines: Optional[list[list[int]]] = None
+    machine_stage_mode: str = StageMode.SHARED
 
     @property
     def n_products(self) -> int:
@@ -206,3 +218,13 @@ class Instance:
     @property
     def operator_windows(self) -> list[list[tuple[int, int]]]:
         return [list(o.shifts) for o in self.operators]
+
+    def stage_of_machine(self, machine_id: int) -> Optional[int]:
+        """In `per_stage` mode, the unique stage this machine belongs to.
+        In `shared` mode, returns the lowest stage that lists it (or None)."""
+        if self.stage_machines is None:
+            return None
+        for s, machines in enumerate(self.stage_machines):
+            if machine_id in machines:
+                return s
+        return None
