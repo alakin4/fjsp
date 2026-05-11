@@ -1,6 +1,17 @@
 {
   "name": "small-1",
   "horizon": 200,
+  "machine_stage_mode": "per_stage",
+  "stage_machines": [
+    [
+      0,
+      1
+    ],
+    [
+      2,
+      3
+    ]
+  ],
   "products": [
     {
       "id": 0,
@@ -10,30 +21,16 @@
           "stage_idx": 0,
           "name": "stage-0",
           "eligible_machines": {
-            "0": 7
+            "1": 4,
+            "0": 6
           }
         },
         {
           "stage_idx": 1,
           "name": "stage-1",
           "eligible_machines": {
-            "1": 3,
-            "0": 7
-          }
-        },
-        {
-          "stage_idx": 2,
-          "name": "stage-2",
-          "eligible_machines": {
-            "0": 6
-          }
-        },
-        {
-          "stage_idx": 3,
-          "name": "stage-3",
-          "eligible_machines": {
-            "0": 2,
-            "3": 3
+            "3": 5,
+            "2": 4
           }
         }
       ]
@@ -46,18 +43,14 @@
           "stage_idx": 0,
           "name": "stage-0",
           "eligible_machines": {
-            "0": 7,
-            "2": 7,
-            "3": 7
+            "0": 4
           }
         },
         {
           "stage_idx": 1,
           "name": "stage-1",
           "eligible_machines": {
-            "3": 6,
-            "0": 4,
-            "1": 8
+            "2": 6
           }
         }
       ]
@@ -70,15 +63,15 @@
           "stage_idx": 0,
           "name": "stage-0",
           "eligible_machines": {
-            "3": 4
+            "0": 2,
+            "1": 7
           }
         },
         {
           "stage_idx": 1,
           "name": "stage-1",
           "eligible_machines": {
-            "1": 8,
-            "0": 4
+            "3": 5
           }
         }
       ]
@@ -91,14 +84,14 @@
           "stage_idx": 0,
           "name": "stage-0",
           "eligible_machines": {
-            "3": 2
+            "1": 5
           }
         },
         {
           "stage_idx": 1,
           "name": "stage-1",
           "eligible_machines": {
-            "2": 4,
+            "2": 5,
             "3": 8
           }
         }
@@ -112,26 +105,22 @@
       "availability": [
         [
           0,
-          34
+          45
         ],
         [
-          40,
-          63
+          51,
+          100
         ],
         [
-          68,
-          90
+          102,
+          124
         ],
         [
-          96,
-          125
+          131,
+          177
         ],
         [
-          133,
-          173
-        ],
-        [
-          179,
+          182,
           200
         ]
       ],
@@ -144,24 +133,24 @@
         },
         "0": {
           "0": 0,
-          "1": 2,
+          "1": 3,
           "2": 3,
           "3": 1
         },
         "1": {
           "0": 3,
           "1": 0,
-          "2": 1,
-          "3": 1
+          "2": 2,
+          "3": 2
         },
         "2": {
-          "0": 3,
-          "1": 1,
+          "0": 1,
+          "1": 3,
           "2": 0,
           "3": 2
         },
         "3": {
-          "0": 1,
+          "0": 3,
           "1": 1,
           "2": 1,
           "3": 0
@@ -175,26 +164,22 @@
       "availability": [
         [
           0,
-          32
+          49
         ],
         [
-          36,
-          70
+          55,
+          82
         ],
         [
-          77,
-          123
+          85,
+          130
         ],
         [
-          127,
-          152
+          133,
+          178
         ],
         [
-          156,
-          187
-        ],
-        [
-          190,
+          184,
           200
         ]
       ],
@@ -207,23 +192,23 @@
       "availability": [
         [
           0,
-          42
+          22
         ],
         [
-          49,
-          89
+          26,
+          74
         ],
         [
-          91,
-          130
+          80,
+          129
         ],
         [
-          137,
-          162
+          134,
+          157
         ],
         [
-          168,
-          200
+          161,
+          198
         ]
       ],
       "setup_times": {
@@ -235,25 +220,25 @@
         },
         "0": {
           "0": 0,
-          "1": 1,
-          "2": 2,
-          "3": 2
+          "1": 3,
+          "2": 1,
+          "3": 3
         },
         "1": {
           "0": 2,
           "1": 0,
           "2": 3,
-          "3": 3
+          "3": 1
         },
         "2": {
           "0": 3,
-          "1": 1,
+          "1": 3,
           "2": 0,
           "3": 3
         },
         "3": {
           "0": 2,
-          "1": 1,
+          "1": 2,
           "2": 1,
           "3": 0
         }
@@ -266,22 +251,26 @@
       "availability": [
         [
           0,
-          46
+          39
         ],
         [
-          48,
-          93
+          47,
+          79
         ],
         [
-          97,
-          129
+          83,
+          121
         ],
         [
-          133,
-          155
+          124,
+          153
         ],
         [
-          158,
+          156,
+          182
+        ],
+        [
+          190,
           200
         ]
       ],
@@ -294,33 +283,7 @@
       "id": 0,
       "name": "Op0",
       "eligible_machines": [
-        1,
-        2,
-        3
-      ],
-      "shifts": [
-        [
-          0,
-          54
-        ],
-        [
-          64,
-          105
-        ],
-        [
-          115,
-          155
-        ],
-        [
-          171,
-          200
-        ]
-      ]
-    },
-    {
-      "id": 1,
-      "name": "Op1",
-      "eligible_machines": [
+        0,
         1,
         2,
         3
@@ -331,19 +294,43 @@
           33
         ],
         [
-          49,
-          105
+          43,
+          70
         ],
         [
-          114,
-          142
+          79,
+          138
         ],
         [
-          151,
-          185
+          152,
+          200
+        ]
+      ]
+    },
+    {
+      "id": 1,
+      "name": "Op1",
+      "eligible_machines": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "shifts": [
+        [
+          0,
+          51
         ],
         [
-          195,
+          63,
+          116
+        ],
+        [
+          131,
+          178
+        ],
+        [
+          187,
           200
         ]
       ]
@@ -354,24 +341,23 @@
       "eligible_machines": [
         0,
         1,
-        2,
         3
       ],
       "shifts": [
         [
           0,
-          60
+          42
         ],
         [
-          68,
-          100
+          51,
+          90
         ],
         [
-          116,
-          158
+          103,
+          138
         ],
         [
-          171,
+          151,
           200
         ]
       ]
@@ -380,8 +366,8 @@
   "orders": [
     {
       "job_id": 0,
-      "product_id": 3,
-      "deadline": 13,
+      "product_id": 0,
+      "deadline": 25,
       "status": {
         "completed": [],
         "running": []
@@ -389,8 +375,8 @@
     },
     {
       "job_id": 1,
-      "product_id": 0,
-      "deadline": 64,
+      "product_id": 1,
+      "deadline": 19,
       "status": {
         "completed": [],
         "running": []
@@ -398,8 +384,8 @@
     },
     {
       "job_id": 2,
-      "product_id": 2,
-      "deadline": 37,
+      "product_id": 0,
+      "deadline": 22,
       "status": {
         "completed": [],
         "running": []
@@ -408,7 +394,7 @@
     {
       "job_id": 3,
       "product_id": 1,
-      "deadline": 41,
+      "deadline": 36,
       "status": {
         "completed": [],
         "running": []
@@ -417,7 +403,7 @@
     {
       "job_id": 4,
       "product_id": 0,
-      "deadline": 73,
+      "deadline": 35,
       "status": {
         "completed": [],
         "running": []
@@ -426,15 +412,6 @@
     {
       "job_id": 5,
       "product_id": 2,
-      "deadline": 47,
-      "status": {
-        "completed": [],
-        "running": []
-      }
-    },
-    {
-      "job_id": 6,
-      "product_id": 1,
       "deadline": 46,
       "status": {
         "completed": [],
@@ -442,9 +419,18 @@
       }
     },
     {
+      "job_id": 6,
+      "product_id": 0,
+      "deadline": 38,
+      "status": {
+        "completed": [],
+        "running": []
+      }
+    },
+    {
       "job_id": 7,
-      "product_id": 1,
-      "deadline": 58,
+      "product_id": 0,
+      "deadline": 45,
       "status": {
         "completed": [],
         "running": []

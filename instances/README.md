@@ -26,6 +26,12 @@ solver can read with `fjsp solve --instance <path>`.
     }
   ],
 
+  // Shop-level stage layout. Each `stage_machines[k]` lists the
+  // machines eligible for stage k. Each product's `Stage.eligible_machines`
+  // for index k must be a subset of this list.
+  "machine_stage_mode": "per_stage",  // or "shared"
+  "stage_machines": [[0, 1], [2, 3]], // null for "no shop-level partition"
+
   // 1 entry per machine.
   "machines": [
     {
@@ -108,19 +114,41 @@ before t = 0, with a "now" line at t = 0.
 
 ## Generate instances on the command line
 
-```bash
-# write a synthetic 4-product / 5-machine / 4-operator / 10-order instance
-uv run fjsp generate \
-    --name small-1 \
-    --products 4 --machines 5 --operators 4 --orders 10 \
-    --horizon 200 --seed 0 \
-    -o instances/small-1.json
-```
-
-Then solve it:
+The generator is driven by a `ProblemConfig`, normally loaded from
+[`problem_config.yaml`](../problem_config.yaml) at the project root.
+Per-flag overrides on the CLI take precedence.
 
 ```bash
-uv run fjsp solve --instance instances/small-1.json --max-iter 200 --alpha 0.3 --seed 0
+# from the supplied config:
+uv run fjsp generate -c problem_config.yaml -o instances/small-1.json
+
+# or override individual fields:
+uv run fjsp generate -c problem_config.yaml --seed 42 --mode shared \
+    -o instances/small-shared.json
+
+# bare-minimum without a config:
+uv run fjsp generate --machines 6 --operators 3 --orders 10 \
+    --n-stages 3 --mode per_stage \
+    -o instances/M6S3.json
 ```
 
-`fjsp inspect <path>` prints a human-readable summary of any instance.
+Then solve and `inspect`:
+
+```bash
+uv run fjsp solve   --instance instances/small-1.json --max-iter 200 --alpha 0.3 --seed 0
+uv run fjsp inspect instances/small-1.json
+```
+
+### Stage-machine layout
+
+The `--mode` flag (and `machine_stage_mode` field in YAML) chooses how
+machines are distributed across the shop's production stages:
+
+| Mode        | What it means                                                                   |
+| ----------- | ------------------------------------------------------------------------------- |
+| `per_stage` | Each machine belongs to *exactly one* stage; the lists in `stage_machines` are **disjoint**. Models a true flow shop with stage-specialized machines. |
+| `shared`    | A machine may be eligible for *multiple* stages; lists may overlap. Standard FJSP. |
+
+Either way, every product's `Stage.eligible_machines[k]` must be a
+subset of `stage_machines[k]` — `validate_instance` will refuse an
+instance that violates this.

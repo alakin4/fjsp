@@ -1,6 +1,17 @@
 {
   "name": "toy",
   "horizon": 10000,
+  "machine_stage_mode": "per_stage",
+  "stage_machines": [
+    [
+      0,
+      1
+    ],
+    [
+      2,
+      3
+    ]
+  ],
   "products": [
     {
       "id": 0,
@@ -18,8 +29,8 @@
           "stage_idx": 1,
           "name": "stage-1",
           "eligible_machines": {
-            "0": 2,
-            "1": 4
+            "2": 2,
+            "3": 4
           }
         }
       ]
@@ -40,8 +51,8 @@
           "stage_idx": 1,
           "name": "stage-1",
           "eligible_machines": {
-            "0": 3,
-            "1": 5
+            "2": 3,
+            "3": 5
           }
         }
       ]
@@ -101,6 +112,60 @@
         }
       },
       "current_product_id": null
+    },
+    {
+      "id": 2,
+      "name": "M2",
+      "availability": [
+        [
+          0,
+          10000
+        ]
+      ],
+      "setup_times": {
+        "-1": {
+          "0": 0,
+          "1": 0
+        },
+        "0": {
+          "0": 0,
+          "1": 1
+        },
+        "1": {
+          "0": 2,
+          "1": 0
+        }
+      },
+      "current_product_id": null
+    },
+    {
+      "id": 3,
+      "name": "M3",
+      "availability": [
+        [
+          0,
+          4
+        ],
+        [
+          6,
+          10000
+        ]
+      ],
+      "setup_times": {
+        "-1": {
+          "0": 0,
+          "1": 0
+        },
+        "0": {
+          "0": 0,
+          "1": 1
+        },
+        "1": {
+          "0": 2,
+          "1": 0
+        }
+      },
+      "current_product_id": null
     }
   ],
   "operators": [
@@ -109,7 +174,9 @@
       "name": "Op0",
       "eligible_machines": [
         0,
-        1
+        1,
+        2,
+        3
       ],
       "shifts": [
         [
@@ -127,7 +194,9 @@
       "name": "Op1",
       "eligible_machines": [
         0,
-        1
+        1,
+        2,
+        3
       ],
       "shifts": [
         [
