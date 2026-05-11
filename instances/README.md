@@ -1,9 +1,95 @@
-# FJSP instance files
+# FJSP instances
 
-Each `*.json` file in this folder is a self-contained FJSP instance the
-solver can read with `fjsp solve --instance <path>`.
+Each instance lives in its **own subfolder** under `instances/`. The
+folder bundles the JSON the solver reads and (when applicable) the YAML
+config that generated it:
 
-## Schema
+```
+instances/
+├── toy/
+│   └── instance.json              # built by toy_instance() — no yaml
+├── toy-running/
+│   └── instance.json              # toy_instance() + manual per-stage status
+└── small-1/
+    ├── instance.json
+    └── problem_config.yaml        # the config used to generate it
+```
+
+Run any of them with:
+
+```bash
+uv run fjsp solve --instance instances/<name>/instance.json
+uv run fjsp inspect instances/<name>/instance.json
+```
+
+The bare `uv run fjsp` defaults to `instances/toy/instance.json`.
+
+## Bundled examples
+
+| Folder                   | Notes                                                                 |
+| ------------------------ | --------------------------------------------------------------------- |
+| `instances/toy/`         | 2 products, 4 machines split 2-per-stage across 2 stages (`per_stage` mode), 2 operators. All orders pending. Built by `toy_instance()`. |
+| `instances/toy-running/` | Same shop layout, three orders demonstrating per-stage state: **J0** all pending; **J1** stage 0 completed (P1 on M0/Op0 from t = -4 to 0); **J2** stage 0 completed (P1 on M1/Op1 from t = -3 to 0) and stage 1 running (P1 on M2/Op0 from t = 0 to 3). |
+| `instances/small-1/`     | Output of `fjsp generate -c instances/small-1/problem_config.yaml -d instances/small-1`. |
+
+## Generating a new instance into the folder convention
+
+Two ways to drop a new instance under `instances/`:
+
+```bash
+# 1) recommended — fjsp writes the folder for you (instance.json + problem_config.yaml):
+uv run fjsp generate \
+    -c instances/small-1/problem_config.yaml \
+    --seed 42 \
+    --out-dir instances/my-instance
+
+# 2) explicit file path (no config copy):
+uv run fjsp generate \
+    -c instances/small-1/problem_config.yaml \
+    -o instances/my-instance.json
+```
+
+`--out-dir` (`-d`) is the convention used by the bundled examples: it
+creates the folder if needed, writes `instance.json`, and copies the
+`--config` YAML alongside (or dumps the *effective* config as YAML if
+none was provided). CLI flags like `--seed`, `--mode`, `--machines`
+override individual fields of the loaded config — the saved YAML is the
+input config, so if you override fields on the command line, edit the
+saved YAML to record what you actually used.
+
+### Stage-machine layout
+
+The `--mode` flag (and `machine_stage_mode` field in YAML) chooses how
+machines are distributed across the shop's production stages:
+
+| Mode        | What it means                                                                   |
+| ----------- | ------------------------------------------------------------------------------- |
+| `per_stage` | Each machine belongs to *exactly one* stage; the lists in `stage_machines` are **disjoint**. Models a true flow shop with stage-specialized machines. |
+| `shared`    | A machine may be eligible for *multiple* stages; lists may overlap. Standard FJSP. |
+
+Either way, every product's `Stage.eligible_machines[k]` must be a
+subset of `stage_machines[k]` — `validate_instance` (run automatically
+on load) refuses an instance that violates this.
+
+## How per-stage state affects scheduling
+
+For each order the solver:
+
+- skips every stage in `status.completed` and `status.running`;
+- pins the **machine** and **operator** of each running stage as busy
+  until that stage's `end` (the expected finish time);
+- propagates the running stage's product onto the machine, so the next
+  newly-scheduled op on it pays the correct setup;
+- schedules everything else (the *pending* stages — those not in either
+  list) starting from t = 0.
+
+In the visualization all three categories are drawn together: completed
+stages keep their actual past times, running stages keep their expected
+end, and pending stages get whatever times the solver assigns. The chart
+extends into negative time automatically if any completed stage starts
+before t = 0, with a "now" line at t = 0.
+
+## JSON schema
 
 ```jsonc
 {
@@ -72,9 +158,9 @@ solver can read with `fjsp solve --instance <path>`.
       "product_id": 0,
       "deadline": 12,
       "status": {
-        // Stages that are already finished. Each entry is a
-        // StageHistory: stage_idx, machine_id, operator_id, start, end,
-        // setup_duration. Past times (end <= 0) are typical.
+        // Stages already finished. Each entry is a StageHistory:
+        // stage_idx, machine_id, operator_id, start, end, setup_duration.
+        // Past times (end <= 0) are typical.
         "completed": [],
         // Stages currently in progress. `end` here is the EXPECTED end.
         // The solver pins (machine, operator) busy until that time.
@@ -85,70 +171,3 @@ solver can read with `fjsp solve --instance <path>`.
   ]
 }
 ```
-
-## Bundled examples
-
-| File                 | Notes                                                               |
-| -------------------- | ------------------------------------------------------------------- |
-| `toy.json`           | The 2-job / 2-machine / 2-operator instance from the README walk-through. All orders pending. |
-| `toy-running.json`   | Three orders demonstrating per-stage state:<br>**J0** — all stages pending.<br>**J1** — stage 0 completed (P1 ran on M0/Op0 from t = -4 to 0); stage 1 pending.<br>**J2** — stage 0 completed (P1 ran on M1/Op1 from t = -3 to 0); stage 1 running on M0/Op0 with expected end at t = 3. |
-| `small-1.json`       | Output of `fjsp generate --seed 42 --machines 4 --operators 3 --products 4 --orders 8`. |
-
-## How per-stage state affects scheduling
-
-For each order the solver:
-
-- skips every stage in `status.completed` and `status.running`;
-- pins the **machine** and **operator** of each running stage as busy
-  until that stage's `end` (the expected finish time);
-- propagates the running stage's product onto the machine, so the next
-  newly-scheduled op on it pays the correct setup;
-- schedules everything else (the *pending* stages — those not in either
-  list) starting from t = 0.
-
-In the visualization all three categories are drawn together: completed
-stages keep their actual past times, running stages keep their expected
-end, and pending stages get whatever times the solver assigns. The chart
-extends into negative time automatically if any completed stage starts
-before t = 0, with a "now" line at t = 0.
-
-## Generate instances on the command line
-
-The generator is driven by a `ProblemConfig`, normally loaded from
-[`problem_config.yaml`](../problem_config.yaml) at the project root.
-Per-flag overrides on the CLI take precedence.
-
-```bash
-# from the supplied config:
-uv run fjsp generate -c problem_config.yaml -o instances/small-1.json
-
-# or override individual fields:
-uv run fjsp generate -c problem_config.yaml --seed 42 --mode shared \
-    -o instances/small-shared.json
-
-# bare-minimum without a config:
-uv run fjsp generate --machines 6 --operators 3 --orders 10 \
-    --n-stages 3 --mode per_stage \
-    -o instances/M6S3.json
-```
-
-Then solve and `inspect`:
-
-```bash
-uv run fjsp solve   --instance instances/small-1.json --max-iter 200 --alpha 0.3 --seed 0
-uv run fjsp inspect instances/small-1.json
-```
-
-### Stage-machine layout
-
-The `--mode` flag (and `machine_stage_mode` field in YAML) chooses how
-machines are distributed across the shop's production stages:
-
-| Mode        | What it means                                                                   |
-| ----------- | ------------------------------------------------------------------------------- |
-| `per_stage` | Each machine belongs to *exactly one* stage; the lists in `stage_machines` are **disjoint**. Models a true flow shop with stage-specialized machines. |
-| `shared`    | A machine may be eligible for *multiple* stages; lists may overlap. Standard FJSP. |
-
-Either way, every product's `Stage.eligible_machines[k]` must be a
-subset of `stage_machines[k]` — `validate_instance` will refuse an
-instance that violates this.

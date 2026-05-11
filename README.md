@@ -138,7 +138,8 @@ Two builders in [src/fjsp/input/generator.py](src/fjsp/input/generator.py):
   YAML file:
 
   ```bash
-  uv run fjsp generate -c problem_config.yaml -o instances/my.json
+  uv run fjsp generate -c instances/small-1/problem_config.yaml \
+      --seed 42 --out-dir instances/my-instance
   ```
 
   Knobs on the config:
@@ -157,8 +158,9 @@ Two builders in [src/fjsp/input/generator.py](src/fjsp/input/generator.py):
   When `stage_machines` is left blank: `per_stage` mode round-robins
   `M0..M{n-1}` across `n_stages`; `shared` mode joins each
   `(machine, stage)` pair independently with probability
-  `stage_share`. See [problem_config.yaml](problem_config.yaml) for the
-  example wired to the bundled `small-1.json`.
+  `stage_share`. See
+  [instances/small-1/problem_config.yaml](instances/small-1/problem_config.yaml)
+  for the example wired to the bundled `small-1` instance.
 
 Per-flag CLI options (`--mode`, `--machines`, `--seed`, …) override
 individual fields of the loaded config. `fjsp inspect <instance.json>`
@@ -167,7 +169,7 @@ prints a human-readable summary including the stage layout.
 ### 1.5 Toy instance
 
 The instance built by `toy_instance()` and saved as
-[instances/toy.json](instances/toy.json) has **2 products, 4 machines,
+[instances/toy/instance.json](instances/toy/instance.json) has **2 products, 4 machines,
 2 operators**, in `per_stage` mode with **2 stages**:
 
 - **stage 0** → machines M0, M1
@@ -198,7 +200,7 @@ Both operators can run all four machines. Setup matrix `s(prev, curr)`
 Switching from P0 to P1 costs 1 unit of setup; from P1 to P0, 2; staying
 on the same product is free; the first op on a machine is free.
 
-The companion [instances/toy-running.json](instances/toy-running.json)
+The companion [instances/toy-running/instance.json](instances/toy-running/instance.json)
 extends this with three orders that exercise the per-stage status
 machinery — one all-pending, one with a completed stage, one mid-flight
 on a stage-1 machine — see §5.5 for what the solver does with each.
@@ -501,14 +503,19 @@ fjsp/
 │   ├── 1-s2.0-S1568494621000740-main.pdf  # Cildoz et al. 2021 — GRASP for ER scheduling
 │   └── cartes2016.pdf               # Cartes & Medina 2016 — GRASP for surgery scheduling
 ├── pyproject.toml                   # uv-managed
-├── instances/                       # one JSON per FJSP instance
-│   ├── README.md                    # JSON schema + how to generate
-│   └── toy.json                     # the canonical toy
+├── instances/                       # one subfolder per instance
+│   ├── README.md                    # JSON schema + folder convention
+│   ├── toy/instance.json            # the canonical toy
+│   ├── toy-running/instance.json    # toy + per-stage status example
+│   └── small-1/                     # generated example
+│       ├── instance.json
+│       └── problem_config.yaml
 ├── src/fjsp/
 │   ├── input/                       # data layer
 │   │   ├── domain.py                # Stage, Product, Machine, Operator,
 │   │   │                            # Order, OrderStatus, Instance
-│   │   ├── io.py                    # load_instance, save_instance
+│   │   ├── io.py                    # load_instance, save_instance, validate
+│   │   ├── config.py                # ProblemConfig + YAML loader
 │   │   └── generator.py             # toy_instance, random_instance
 │   ├── solver.py                    # construct, local_search, simulate,
 │   │                                # grasp, OperationView, _initial_state
@@ -530,7 +537,7 @@ from fjsp import (
     grasp, plot_gantt, export_web_data,
 )
 
-inst  = load_instance("instances/toy.json")    # or toy_instance()
+inst  = load_instance("instances/toy/instance.json")    # or toy_instance()
 sched = grasp(inst, max_iter=200, alpha=0.3, seed=0)
 plot_gantt(sched, inst, save_path="gantt.png")
 export_web_data(inst, sched, "web/data.js")
@@ -556,13 +563,14 @@ Where things live in [solver.py](src/fjsp/solver.py):
 The project is managed with **uv** and the CLI is a click app.
 
 ```bash
-uv sync                                       # install dependencies
-uv run fjsp solve -i instances/toy.json       # solve a saved instance
+uv sync                                              # install dependencies
+uv run fjsp solve -i instances/toy/instance.json     # solve a saved instance
 uv run fjsp generate \
-    --name small-1 --products 4 --machines 5 --operators 4 --orders 10 \
-    --seed 0 -o instances/small-1.json        # write a fresh synthetic instance
-uv run fjsp inspect instances/small-1.json    # print a summary
-uv run fjsp                                   # shortcut: solve instances/toy.json
+    -c instances/small-1/problem_config.yaml \
+    --seed 42 --out-dir instances/my-instance        # writes both instance.json
+                                                     # and problem_config.yaml
+uv run fjsp inspect instances/small-1/instance.json  # print a summary
+uv run fjsp                                          # shortcut for `solve -i instances/toy/instance.json`
 ```
 
 Three subcommands today (`fjsp --help` lists them):
@@ -576,7 +584,7 @@ Three subcommands today (`fjsp --help` lists them):
 Sample output on the toy with `seed=0, α=0.3, max_iter=200`:
 
 ```
-Loaded instance 'toy' from instances/toy.json
+Loaded instance 'toy' from instances/toy/instance.json
   products=2  machines=4  operators=2  orders=2
 Cmax = 11
   op             mach  op#   setup  proc_start  end

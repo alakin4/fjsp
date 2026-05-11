@@ -1,8 +1,11 @@
 """Click-based CLI for the FJSP solver and instance generator."""
 
+import shutil
+from dataclasses import asdict
 from pathlib import Path
 
 import click
+import yaml
 
 from .input.config import ProblemConfig, load_config
 from .input.generator import random_instance, toy_instance
@@ -19,7 +22,7 @@ def cli(ctx: click.Context) -> None:
 
     Run `fjsp solve` to optimize an instance and `fjsp generate` to write a
     new instance file. With no subcommand, defaults to solving the bundled
-    toy instance (`instances/toy.json` or the in-memory toy).
+    toy instance (`instances/toy/instance.json` or the in-memory toy).
     """
     if ctx.invoked_subcommand is None:
         ctx.invoke(solve)
@@ -31,7 +34,7 @@ def cli(ctx: click.Context) -> None:
 @click.option(
     "--instance", "-i", "instance_path",
     type=click.Path(dir_okay=False, path_type=Path),
-    default="instances/toy.json",
+    default="instances/toy/instance.json",
     show_default=True,
     help="Path to the instance JSON. If missing, the bundled toy is used.",
 )
@@ -113,9 +116,14 @@ def solve(
               help="Fraction of machines that require setup.")
 @click.option("--operator-coverage", default=None, type=float,
               help="P(operator can run a given machine).")
-@click.option("--output", "-o", "output_path", required=True,
+@click.option("--output", "-o", "output_path", default=None,
               type=click.Path(dir_okay=False, path_type=Path),
-              help="Where to write the instance JSON.")
+              help="Where to write the instance JSON (mutually exclusive with --out-dir).")
+@click.option("--out-dir", "-d", "out_dir", default=None,
+              type=click.Path(file_okay=False, path_type=Path),
+              help="Folder convention: writes <dir>/instance.json AND "
+                   "<dir>/problem_config.yaml (copy of --config, or a dump "
+                   "of the effective config if --config is not given).")
 def generate(
     config_path: Path | None,
     name: str | None,
@@ -129,13 +137,22 @@ def generate(
     mode: str | None,
     setup_fraction: float | None,
     operator_coverage: float | None,
-    output_path: Path,
+    output_path: Path | None,
+    out_dir: Path | None,
 ) -> None:
     """Generate a synthetic FJSP instance and save it as JSON.
 
     Loads defaults from --config (a YAML ProblemConfig). Other flags
     override individual fields. Without --config, internal defaults apply.
+
+    Either --output (single .json file) or --out-dir (folder convention,
+    writes instance.json + problem_config.yaml inside) is required.
     """
+    if (output_path is None) == (out_dir is None):
+        raise click.UsageError(
+            "Provide exactly one of --output / -o or --out-dir / -d."
+        )
+
     cfg = load_config(config_path) if config_path else ProblemConfig()
     overrides = {
         "name": name,
@@ -151,8 +168,23 @@ def generate(
         "operator_machine_coverage": operator_coverage,
     }
     inst = random_instance(cfg, **overrides)
-    written = save_instance(inst, output_path)
-    click.secho(f"Wrote {written}", fg="green")
+
+    if out_dir is not None:
+        out_dir.mkdir(parents=True, exist_ok=True)
+        written = save_instance(inst, out_dir / "instance.json")
+        cfg_target = out_dir / "problem_config.yaml"
+        if config_path is not None:
+            shutil.copyfile(config_path, cfg_target)
+        else:
+            # No source config — dump the effective one we just used.
+            cfg_target.write_text(yaml.safe_dump(asdict(cfg),
+                                                 sort_keys=False))
+        click.secho(f"Wrote {written}", fg="green")
+        click.secho(f"Wrote {cfg_target}", fg="green")
+    else:
+        written = save_instance(inst, output_path)
+        click.secho(f"Wrote {written}", fg="green")
+
     click.echo(
         f"  products={inst.n_products}  machines={inst.n_machines}  "
         f"operators={inst.n_operators}  orders={inst.n_jobs}  "
