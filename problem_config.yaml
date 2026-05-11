@@ -1,0 +1,47 @@
+# Problem configuration for `fjsp generate`.
+#
+# Run:   uv run fjsp generate -c problem_config.yaml -o instances/my.json
+#
+# Any field omitted here uses ProblemConfig defaults
+# (see src/fjsp/input/config.py). CLI flags override individual fields.
+
+# ---- instance metadata ----
+name: small-1
+horizon: 200
+
+# ---- counts ----
+n_products: 4
+n_machines: 4
+n_operators: 3
+n_orders: 8
+
+# ---- shop-level stage layout ----
+n_stages: 2
+
+# How machines are distributed across stages:
+#   per_stage  → each machine belongs to exactly one stage (strict partition).
+#                The lists in `stage_machines` must be disjoint.
+#   shared     → a machine may serve multiple stages.
+machine_stage_mode: per_stage
+
+# Optional explicit assignment. If omitted, machines are auto-distributed:
+#   per_stage  → round-robin partition of M0..M{n-1} across the n_stages.
+#   shared     → each (machine, stage) pair is allowed with prob `stage_share`.
+stage_machines:
+  - [0, 1]      # stage 0 → M0, M1
+  - [2, 3]      # stage 1 → M2, M3
+
+# ---- operators ----
+operator_machine_coverage: 0.7   # P(operator allowed on each machine)
+
+# ---- setup matrix ----
+setup_machines_fraction: 0.5     # fraction of machines that need setup
+setup_time_min: 1
+setup_time_max: 3
+
+# ---- processing time bounds (per stage on each eligible machine) ----
+proc_time_min: 2
+proc_time_max: 8
+
+# ---- random seed ----
+seed: 0
