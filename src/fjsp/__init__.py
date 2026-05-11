@@ -2,6 +2,7 @@
 setups, and per-stage order status."""
 
 from .cli import cli
+from .input.config import ProblemConfig, load_config
 from .input.domain import (
     HORIZON,
     Instance,
@@ -12,10 +13,11 @@ from .input.domain import (
     Product,
     Stage,
     StageHistory,
+    StageMode,
     StageState,
 )
 from .input.generator import random_instance, toy_instance
-from .input.io import load_instance, save_instance
+from .input.io import load_instance, save_instance, validate_instance
 from .output.gantt import plot_gantt
 from .output.web_export import export_web_data
 from .solver import (
@@ -44,17 +46,20 @@ __all__ = [
     "Operator",
     "Order",
     "OrderStatus",
+    "ProblemConfig",
     "Product",
     "Schedule",
     "ScheduledOp",
     "Stage",
     "StageHistory",
+    "StageMode",
     "StageState",
     "cli",
     "combined_ops",
     "construct",
     "export_web_data",
     "grasp",
+    "load_config",
     "load_instance",
     "local_search",
     "main",
@@ -64,4 +69,5 @@ __all__ = [
     "simulate",
     "toy_instance",
     "total_makespan",
+    "validate_instance",
 ]
