@@ -4,6 +4,7 @@ from pathlib import Path
 
 import click
 
+from .input.config import ProblemConfig, load_config
 from .input.generator import random_instance, toy_instance
 from .input.io import load_instance, save_instance
 from .output.gantt import plot_gantt
@@ -92,52 +93,74 @@ def solve(
 # ------------------------------ generate ---------------------------------
 
 @cli.command()
-@click.option("--name", default="rand", show_default=True,
-              help="Instance name written to the JSON file.")
-@click.option("--products", default=4, show_default=True, type=int)
-@click.option("--machines", default=5, show_default=True, type=int)
-@click.option("--operators", default=4, show_default=True, type=int)
-@click.option("--orders", default=10, show_default=True, type=int)
-@click.option("--horizon", default=200, show_default=True, type=int)
-@click.option("--seed", default=0, show_default=True, type=int)
-@click.option("--setup-fraction", default=0.5, show_default=True, type=float,
+@click.option("--config", "-c", "config_path",
+              type=click.Path(exists=True, dir_okay=False, path_type=Path),
+              help="YAML problem config (per-field flags below override it).")
+@click.option("--name", default=None, type=str)
+@click.option("--products", default=None, type=int)
+@click.option("--machines", default=None, type=int)
+@click.option("--operators", default=None, type=int)
+@click.option("--orders", default=None, type=int)
+@click.option("--horizon", default=None, type=int)
+@click.option("--seed", default=None, type=int)
+@click.option("--n-stages", default=None, type=int,
+              help="Number of shop-level stages.")
+@click.option("--mode",
+              type=click.Choice(["per_stage", "shared"]),
+              default=None,
+              help="How machines are distributed across stages.")
+@click.option("--setup-fraction", default=None, type=float,
               help="Fraction of machines that require setup.")
-@click.option("--operator-coverage", default=0.7, show_default=True, type=float,
+@click.option("--operator-coverage", default=None, type=float,
               help="P(operator can run a given machine).")
 @click.option("--output", "-o", "output_path", required=True,
               type=click.Path(dir_okay=False, path_type=Path),
               help="Where to write the instance JSON.")
 def generate(
-    name: str,
-    products: int,
-    machines: int,
-    operators: int,
-    orders: int,
-    horizon: int,
-    seed: int,
-    setup_fraction: float,
-    operator_coverage: float,
+    config_path: Path | None,
+    name: str | None,
+    products: int | None,
+    machines: int | None,
+    operators: int | None,
+    orders: int | None,
+    horizon: int | None,
+    seed: int | None,
+    n_stages: int | None,
+    mode: str | None,
+    setup_fraction: float | None,
+    operator_coverage: float | None,
     output_path: Path,
 ) -> None:
-    """Generate a synthetic FJSP instance and save it as JSON."""
-    inst = random_instance(
-        name=name,
-        n_products=products,
-        n_machines=machines,
-        n_operators=operators,
-        n_orders=orders,
-        horizon=horizon,
-        setup_machines_fraction=setup_fraction,
-        operator_machine_coverage=operator_coverage,
-        seed=seed,
-    )
+    """Generate a synthetic FJSP instance and save it as JSON.
+
+    Loads defaults from --config (a YAML ProblemConfig). Other flags
+    override individual fields. Without --config, internal defaults apply.
+    """
+    cfg = load_config(config_path) if config_path else ProblemConfig()
+    overrides = {
+        "name": name,
+        "n_products": products,
+        "n_machines": machines,
+        "n_operators": operators,
+        "n_orders": orders,
+        "horizon": horizon,
+        "seed": seed,
+        "n_stages": n_stages,
+        "machine_stage_mode": mode,
+        "setup_machines_fraction": setup_fraction,
+        "operator_machine_coverage": operator_coverage,
+    }
+    inst = random_instance(cfg, **overrides)
     written = save_instance(inst, output_path)
     click.secho(f"Wrote {written}", fg="green")
     click.echo(
         f"  products={inst.n_products}  machines={inst.n_machines}  "
         f"operators={inst.n_operators}  orders={inst.n_jobs}  "
-        f"horizon={inst.horizon}"
+        f"horizon={inst.horizon}  mode={inst.machine_stage_mode}"
     )
+    if inst.stage_machines is not None:
+        for s_idx, m_list in enumerate(inst.stage_machines):
+            click.echo(f"    stage {s_idx} machines: {m_list}")
 
 
 # ------------------------------ inspect ---------------------------------
@@ -150,6 +173,10 @@ def inspect(instance_path: Path) -> None:
     inst = load_instance(instance_path)
     click.secho(f"Instance: {inst.name}", bold=True)
     click.echo(f"  horizon: {inst.horizon}")
+    click.echo(f"  stage layout: mode={inst.machine_stage_mode}")
+    if inst.stage_machines is not None:
+        for s_idx, m_list in enumerate(inst.stage_machines):
+            click.echo(f"    stage {s_idx}: machines {m_list}")
     click.echo(f"  products  ({inst.n_products}):")
     for p in inst.products:
         click.echo(f"    P{p.product_id} {p.name}: "
